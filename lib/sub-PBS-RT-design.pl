@@ -77,7 +77,7 @@ sub find_RT {
     my %rthash; # hash that stores the candidate RT templates
     my %allrthash; #hash that stores all candidate RT templates, irrespective of 'C' ending
     my @rtlengths; # array that stores the lengths of the candidate RT templates
-    my $rttable = '<table style ="width:30%; float = left">';
+    my $rttable = '<table style ="width:40%; float = left">';
     $rttable .= "<tr><th>Length</th><th>TemplateSequence</th><th>Warnings</th>";
     my $rtcounter = 0; #counts how many templates have been found that do not have 'C' ending.
 

@@ -42,7 +42,7 @@ post '/upload' => sub {
   my $seq1 = uc($wt);
   my $seq2 = uc($edit);
   my @nw_out = needleman_wunsch($seq1,$seq2);
-  my ($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p) = @nw_out;
+  my ($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p,$wtdelcounter) = @nw_out;
 
   #if alignments are gapped, kill the process
   if ($trimmingStatus5p != 0 || $trimmingStatus3p != 0){
@@ -52,7 +52,7 @@ post '/upload' => sub {
     $align1f =~ s/(.{50})\K(?=.)/<br>/g;
     $align2f =~ s/(.{50})\K(?=.)/<br>/g;
 
-     return $c->render(text => 'Wildtype and desired sequence are not aligned on the 5\' or 3\' ends.<br>Please trim off the hanging DNA bases and rerun pegFinder (see alignment below). <br><br>If you used Broad sgRNA results, please also rerun the Broad sgRNA finder using the trimmed wildtype sequence. <br><hr><br>Wildtype:<br>'.$align1f.'<br><br>Edited:<br>'.$align2f.'<br> ', status => 200);
+     return $c->render(text => 'Wildtype and desired sequence are not aligned on the 5\' or 3\' ends.<br>Please trim off the hanging DNA bases and rerun pegFinder (see alignment below). <br><br>If you used Broad sgRNA results, please also rerun the Broad sgRNA finder using the revised wildtype sequence (if modified). <br><hr><br>Wildtype:<br>'.$align1f.'<br><br>Edited:<br>'.$align2f.'<br> ', status => 200);
   }
   #Process the sgRNA input
   #Can either take a file upload or a chosen sgRNA
@@ -98,7 +98,7 @@ post '/upload' => sub {
       }
       #if sgRNA is present, then go ahead and calculate the sgRNA metrics
       else {
-        my @sgdata = process_chosen_sgRNA($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance); #returns ($chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,$sgfoundStatus);
+        my @sgdata = process_chosen_sgRNA($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter); #returns ($chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,$sgfoundStatus);
         #if the chosen sgRNA matches to multiple positions, report back
         return $c->render(text => 'Preselected sgRNA matches to multiple positions in wildtype sequence. Please use a different sgRNA or use the Broad sgRNA finder and upload the results.', status => 200)
           unless ($sgdata[0] ne "non-unique");
@@ -182,7 +182,7 @@ print "testing\n";
     if ($boolfile == 1){ #if valid sgRNA file
       #Choose an sgRNA
       #print "$data_text\n\n$minEditPos\n$maxEditPos\t$maxEditDistance\n";
-      my @sgdata = process_sgRNA($data_text, $minEditPos,$maxEditPos,$maxEditDistance);
+      my @sgdata = process_sgRNA($data_text, $minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter);
       
       #if no sgRNAs were found, report back
       return $c->render(text => 'No candidate sgRNAs found.', status => 200)
@@ -250,7 +250,7 @@ print "testing\n";
     
     #compile the pegRNA and get the oligos
     my $pegRNA = $chosenSG.$scaffold.$chosenRT.$chosenPBS;
-    my $oligotable ='<table style ="width:70%; float = left">';
+    my $oligotable ='<table style ="width:80%; float = left">';
     $oligotable .= "<tr><th>OligoName</th><th>Sequence</th><th>Description</th></tr>";
 
     $oligotable .= '<tr><td>sgF</td><td>caccg'.$chosenSG.'gttttaga</td><td>sgRNA, forward</tr>';
@@ -274,7 +274,15 @@ print "testing\n";
     if (defined $sgfile && ($data_text ne "" || $sgfoundStatus == 2)){
       if ($pe3Bool == 0){
         $c->render(text=>"
-        <style>table, th, td {border: 1px solid black;}</style>
+        <a href=\"http://pegfinder.sidichenlab.org\">
+        <img src=\"/images/logo2.png\" height=\"100\" width=\"337\" /></a>
+        <br><br><hr><br>
+        <style>table, th, td {border: 1px solid black;}
+        table {border-collapse:collapse;}tr:hover {background-color:#f5f5f5;}
+        body {padding-left: 10px; font-family: Arial !important}
+        th {background-color: #18a2bf;color: white;}
+        th,td{padding-left:10px; padding-right:10px; padding-top: 3px; padding-bottom:3px; text-align: left;}
+        </style>
         <b><u>Recommended selections for pegRNA design</u></b><br>
         sgRNA: $chosenSG<br>
         RT template ($chosenRTlen nt): $chosenRT<br>
@@ -282,17 +290,17 @@ print "testing\n";
         Sense 3' extension: $extension<br>
         Full-length pegRNA: $pegRNA<br><br>
           
-        <u><b>Oligos to ligation clone the pegRNA into Addgene #132777 </b></u><br>
-        (Note: May need to customize the overhangs for your plasmids.) <br>
+        <p><u><b>Oligos to ligation clone the pegRNA into Addgene #132777 </b></u><br>
+        (Note: May need to customize the overhangs for your plasmids.)</p>
         $oligotable <br>
         <hr>
-        <b>Candidate editing sgRNA table</b><br>
+        <p><b><u>Candidate primary sgRNAs</u></b></p>
         $sgtable <br>
 
-        <b>Candidate RT templates</b>
+        <p><b><u>Candidate RT templates</u></b></p>
         $rttable <br>
 
-        <b>Candidate PBS</b>
+        <p><b><u>Candidate PBS sequences</u></b></p>
         $pbstable<br>
 
         ");
@@ -300,8 +308,16 @@ print "testing\n";
       elsif (defined $chosenNickSG){
         if ($chosenNickSG ne ""){
           $c->render(text=>"
-          <style>table, th, td {border: 1px solid black;}</style>
-          <b><u>Recommended selections for pegRNA design</u></b><br>
+        <a href=\"http://pegfinder.sidichenlab.org\">
+        <img src=\"/images/logo2.png\" height=\"100\" width=\"337\" /></a>
+        <br><br><hr><br>
+        <style>table, th, td {border: 1px solid black;}
+        table {border-collapse:collapse;}tr:hover {background-color:#f5f5f5;}
+        body {padding-left: 10px; font-family: Arial !important}
+        th {background-color: #18a2bf;color: white;}
+        th,td{padding-left:10px; padding-right:10px; padding-top: 3px; padding-bottom:3px; text-align: left;}
+        </style>
+        <b><u>Recommended selections for pegRNA design</u></b><br>
           sgRNA: $chosenSG<br>
           RT template ($chosenRTlen nt): $chosenRT<br>
           PBS ($chosenPBSlen nt): $chosenPBS<br>
@@ -310,22 +326,22 @@ print "testing\n";
 
           PE3 nicking sgRNA: $chosenNickSG<br><br>
           
-          <u><b>Oligos to ligation clone the pegRNA into Addgene #132777 </b></u><br>
-          (Note: May need to customize the overhangs for your plasmids.)<br>PE3 nicking sgRNA oligos are designed for standard hU6-sgRNA vectors. <br>
+          <p><u><b>Oligos to ligation clone the pegRNA into Addgene #132777 </b></u><br>
+          (Note: May need to customize the overhangs for your plasmids.)<br>PE3 nicking sgRNA oligos are designed for standard hU6-sgRNA vectors. <br></p>
           $oligotable <br>
 
           <hr>
 
-          <b>Candidate primary editing sgRNAs</b><br>
+          <p><b><u>Candidate primary editing sgRNAs</u></b></p>
           $sgtable <br>
 
-          <b>Candidate RT templates</b>
+          <p><b><u>Candidate RT templates</u></b></p>
           $rttable <br>
 
-          <b>Candidate PBS</b>
+          <p><b><u>Candidate PBS sequences</b></u></p>
           $pbstable<br>
 
-          <b>Candidate PE3 secondary nicking sgRNAs</b>
+          <p><b><u>Candidate secondary nicking sgRNAs (for PE3)</b></u></p>
           $nicksgtable<br>
 
           ");
@@ -347,12 +363,13 @@ __DATA__
   <document.getElementById('sgRNA').value='';
   <body>
   <style>
-    p.sansserif {
-      font-family:Arial,Helvetica,sans-serif;
-    }
-    body { padding-left: 10px
+  body {padding-left: 10px; font-family: Arial !important}
   </style>
-  <h2><p class="sansserif" style="color:#0e92ad">pegFinder: pegRNA designer tool for CRISPR-Cas9 Prime Editing</p></h2>
+
+
+  <a href="http://pegfinder.sidichenlab.org">
+  <img src="/images/logo2.png" height="100" width="337"/></a>
+    <br><br>
     %= form_for upload => (enctype => 'multipart/form-data') => begin
       Wildtype/reference sequence<br>
       %= text_area 'wildtype',cols => 80, rows => 5, maxlength => 10000, placeholder => 'Wildtype/reference DNA sequence in plaintext. Must share 5\' and 3\' ends with the edited/desired sequence. Recommend >100 bp flanks around target edit.'
@@ -396,5 +413,9 @@ __DATA__
     alt="Web Analytics"></a></div></noscript>
     <!-- End of Statcounter Code -->
   </body>
+
+  <footer>
+    <p> &copy 2019, Laboratory of Sidi Chen</p>
+  </footer>
   
 </html>

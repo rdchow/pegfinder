@@ -6,7 +6,7 @@ $|=2;
 #feed it the slurped sgRNA output, minEditPos, maxEditPos, and also the maxEditDistance
 #process_sgRNA refers to processing the Broad sgRNA file
 sub process_sgRNA {
-    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance) = @_;
+    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter) = @_;
     $data_text =~ s/"//g;
     my @rows = split (/[\r\n]+/,$data_text);
     my $head = $rows[0];
@@ -69,9 +69,10 @@ sub process_sgRNA {
         }
         #Antisense strand sgRNAs:
         elsif ($orientation eq "antisense"){
+            $cutPos--;
             print "$cutPos\t$minEditPos\t$maxEditPos\n";
-            if ($minEditPos >= ($cutPos-$maxEditDistance) && $maxEditPos <= $cutPos && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1)){
-                my $distance = $cutPos-$maxEditPos;
+            if ($minEditPos >= ($cutPos-$maxEditDistance) && $maxEditPos <= ($cutPos+$wtdelcounter) && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1)){
+                my $distance = ($cutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases 
                 $sghash{$sgRNA} = [$onTargetScore,$cutPos,$orientation,$distance];
             }
         }
@@ -214,17 +215,18 @@ sub find_nicksgRNA {
             my $offTargetT2 = $allsghash{$k}[4];
             my $offTargetT3 = $allsghash{$k}[5];
 
-            #only consider nicking sgRNA if on the opposite strand and 30-120 nt away from the chosen cut site
+            #only consider nicking sgRNA if on the opposite strand and 20-100 nt away from the chosen cut site
             if ($chosenOrientation eq "sense"){
-                #if ($orientation eq "antisense" && ($offTargetT1 <= 1) && ($cutPos-$maxEditPos>=20) && ($cutPos-$maxEditPos<= 120) && ($chosenCutPos-$cutPos>=20) && ($chosenCutPos-$cutPos<=100)){
-                if ($orientation eq "antisense" && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1) && (abs($cutPos-$chosenCutPos)>=20) && (abs($cutPos-$chosenCutPos) <= 100) ){
-                    $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$cutPos-$chosenCutPos];
+                $cutPos--;
+                my $dist = $cutPos-$chosenCutPos+1;
+                if ($orientation eq "antisense" && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1) && (abs($dist)>=20) && (abs($dist) <= 100) ){
+                    $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$dist];
                 }
             }
             elsif ($chosenOrientation eq "antisense"){
-                #if ($orientation eq "sense" && ($offTargetT1 <= 1) && ($minEditPos-$cutPos>=20) && ($maxEditPos-$cutPos<= 120) && ($cutPos-$chosenCutPos>=20) && ($cutPos-$chosenCutPos<=100)){
-                if ($orientation eq "sense" && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1) && (abs($cutPos-$chosenCutPos)>=20) && (abs($cutPos-$chosenCutPos) <= 100) ){
-                    $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$chosenCutPos-$cutPos];
+                my $dist = $cutPos-$chosenCutPos-1;
+                if ($orientation eq "sense" && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1) && (abs($dist)>=20) && (abs($dist) <= 100) ){
+                    $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$dist];
                 }
             }
         }
@@ -253,7 +255,7 @@ sub find_nicksgRNA {
 #If an sgRNA was preselected, calculate the needed metrics (Cut position, orientation, distance to edit, GC %)
 #take the chosen sgRNA sequence, the wildtype DNA sequence, minEditPos, maxEditPos, and maxEditDistance 
 sub process_chosen_sgRNA {
-    my ($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance) = @_;
+    my ($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter) = @_;
     my $chosenOrientation;
     my $chosenSG = $c_sg;
     my $chosenCutPos;
@@ -297,8 +299,8 @@ sub process_chosen_sgRNA {
         elsif ($chosenOrientation eq "antisense"){
             my $rc_c_sg = reverse_complement($c_sg);
             $seq1 =~ /CC.$rc_c_sg/;
-            $chosenCutPos = $-[0]+7;
-            $chosenDistance = $chosenCutPos-$maxEditPos;
+            $chosenCutPos = $-[0]+6;
+            $chosenDistance = ($chosenCutPos-$maxEditPos)+$wtdelcounter-1; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases
         }
 
         print "Using $chosenSG as the preselected sgRNA.\n";

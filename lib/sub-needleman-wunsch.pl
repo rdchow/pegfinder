@@ -123,16 +123,19 @@ sub needleman_wunsch {
     elsif ($chars2[-1] eq "-"){
         $trimmingStatus3p = 2;
     }
-
+    my $wtdelcounter = 0; # counts how many gaps are in the wildtype alignment; need for calculating the edit distance
     #look at the alterations
     my %alterhash; #Stores the alterations to generate sequence 2; 1-based coordinates
     for (my $i = 0; $i < length $align1; $i++){     
         if ($chars1[$i] ne $chars2[$i]){
             print $i+1,"\t",$chars1[$i],"\t",$chars2[$i],"\n";
             $alterhash{$i+1} = $chars1[$i].'>'.$chars2[$i];
-        } 
+        }
+        if ($chars1[$i] eq "-"){
+            $wtdelcounter++;
+        }
     }
-
+print "wildtype deletion: $wtdelcounter\n";
     #determine the most upstream and most downstream positions with alterations
     my $minEditPos;
     my $maxEditPos;
@@ -154,6 +157,6 @@ sub needleman_wunsch {
             }
         }
     }
-    return($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p);
+    return($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p,$wtdelcounter);
 }
 1;
