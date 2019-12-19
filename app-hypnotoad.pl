@@ -43,15 +43,14 @@ post '/upload' => sub {
   my $seq2 = uc($edit);
   my @nw_out = needleman_wunsch($seq1,$seq2);
   my ($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p,$wtdelcounter) = @nw_out;
+  my $align1f = $align1; #formatted $align1 to have 50 chars per line
+  my $align2f = $align2; #formmated $align2 to have 50 chars per line
 
+  $align1f =~ s/(.{50})\K(?=.)/<br>/g;
+  $align2f =~ s/(.{50})\K(?=.)/<br>/g;
+  
   #if alignments are gapped, kill the process
   if ($trimmingStatus5p != 0 || $trimmingStatus3p != 0){
-    my $align1f = $align1; #formatted $align1 to have 50 chars per line
-    my $align2f = $align2; #formmated $align2 to have 50 chars per line
-
-    $align1f =~ s/(.{50})\K(?=.)/<br>/g;
-    $align2f =~ s/(.{50})\K(?=.)/<br>/g;
-
      return $c->render(text => 'Wildtype and desired sequence are not aligned on the 5\' or 3\' ends.<br>Please trim off the hanging DNA bases and rerun pegFinder (see alignment below). <br><br>If you used Broad sgRNA results, please also rerun the Broad sgRNA finder using the revised wildtype sequence (if modified). <br><hr><br>Wildtype:<br>'.$align1f.'<br><br>Edited:<br>'.$align2f.'<br> ', status => 200);
   }
   #Process the sgRNA input
@@ -115,18 +114,13 @@ post '/upload' => sub {
 
         #evaluate whether we need to find PE3 secondary sgRNAs
 
-print "testing\n";
         if ($pe3Bool == 1){ # check mark for finding PE3 secondary guides
           if (defined $sgfile && $data_text ne ""){
             #Validate the sgRNA file
             $boolfile = validate_sgRNA($data_text,"100");
-            print $boolfile,"boolfile\n";
-            print $data_text,"hahahaha\n";
           }
           else { # if sgRNA file is invalid:
             $c->render(text => 'Broad sgRNA file is absent. Please use the results file from the Broad sgRNA designer, or rerun without searching for PE3 secondary sgRNAs.', status => 200);
-            print $boolfile,"boolfile\n";
-            print $data_text,"hahahaha\n";
           }
 
           if ($boolfile == 0){
@@ -235,7 +229,7 @@ print "testing\n";
   #now that we have a chosen sgRNA, let's proceed
   if ($chosenSG ne "" && $sgfoundStatus == 2){
     #Design the RT templates
-    my @rtdata = find_RT($align2,$chosenOrientation,$minEditPos,$maxEditPos,$chosenCutPos);
+    my @rtdata = find_RT($align2,$chosenOrientation,$minEditPos,$maxEditPos,$chosenCutPos,$wtdelcounter);
     my ($rthashpt,$chosenRT,$chosenRTlen,$rttable) = @rtdata;
     my %rthash = %$rthashpt;
 
@@ -274,8 +268,7 @@ print "testing\n";
     if (defined $sgfile && ($data_text ne "" || $sgfoundStatus == 2)){
       if ($pe3Bool == 0){
         $c->render(text=>"
-        <a href=\"http://pegfinder.sidichenlab.org\">
-        <img src=\"/images/logo2.png\" height=\"100\" width=\"337\" /></a>
+        <img src=\"/images/logo4.png\" height=\"100\" width=\"379\" />
         <br><br><hr><br>
         <style>table, th, td {border: 1px solid black;}
         table {border-collapse:collapse;}tr:hover {background-color:#f5f5f5;}
@@ -302,18 +295,20 @@ print "testing\n";
 
         <p><b><u>Candidate PBS sequences</u></b></p>
         $pbstable<br>
+        br><hr>
+        <p><b><u>Sequence alignment:</b></u></p>
+        Wildtype:<br><tt>$align1f</tt><br><br>Edited:<br><tt>$align2f</tt><br>  
 
         ");
       }
       elsif (defined $chosenNickSG){
         if ($chosenNickSG ne ""){
           $c->render(text=>"
-        <a href=\"http://pegfinder.sidichenlab.org\">
-        <img src=\"/images/logo2.png\" height=\"100\" width=\"337\" /></a>
+        <img src=\"/images/logo4.png\" height=\"100\" width=\"379\" />
         <br><br><hr><br>
         <style>table, th, td {border: 1px solid black;}
         table {border-collapse:collapse;}tr:hover {background-color:#f5f5f5;}
-        body {padding-left: 10px; font-family: Arial !important}
+        body {padding-left: 10px; font-family: Arial}
         th {background-color: #18a2bf;color: white;}
         th,td{padding-left:10px; padding-right:10px; padding-top: 3px; padding-bottom:3px; text-align: left;}
         </style>
@@ -344,6 +339,10 @@ print "testing\n";
           <p><b><u>Candidate secondary nicking sgRNAs (for PE3)</b></u></p>
           $nicksgtable<br>
 
+          <br><hr>
+          <p><b><u>Sequence alignment:</b></u></p>
+          Wildtype:<br><tt>$align1f</tt><br><br>Edited:<br><tt>$align2f</tt><br> 
+
           ");
         }
       }
@@ -367,8 +366,7 @@ __DATA__
   </style>
 
 
-  <a href="http://pegfinder.sidichenlab.org">
-  <img src="/images/logo2.png" height="100" width="337"/></a>
+  <img src="/images/logo4.png" height="100" width="379"/>
     <br><br>
     %= form_for upload => (enctype => 'multipart/form-data') => begin
       Wildtype/reference sequence<br>

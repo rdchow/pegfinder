@@ -48,7 +48,7 @@ sub process_sgRNA {
     my %sghash; # stores the candidate sgRNAs for the editing sgRNA
 
     for (my $i = 1; $i < scalar @rows; $i++){
-        print $orientationCol,"\n\n";
+       # print $orientationCol,"\n\n";
         my $line = $rows[$i];
         my @lines = split ("\t",$line);
         my $cutPos = $lines[$cutPosCol];
@@ -148,7 +148,7 @@ sub find_nicksgRNA {
     my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation) = @_;
     $data_text =~ s/"//g;
     my @rows = split (/[\r\n]+/,$data_text);
-    print scalar @rows;
+
     my $head = $rows[0];
     my @headers = split ("\t",$head);
 
@@ -187,7 +187,7 @@ sub find_nicksgRNA {
     my %sghash; # stores the candidate sgRNAs for the editing sgRNA
     my %allsghash; # stores all identified sgRNAs, used for finding PE3 nick sgRNA
     for (my $i = 1; $i < scalar @rows; $i++){
-        print $orientationCol,"\n\n";
+       # print $orientationCol,"\n\n";
         my $line = $rows[$i];
         my @lines = split ("\t",$line);
         my $cutPos = $lines[$cutPosCol];
@@ -266,7 +266,7 @@ sub process_chosen_sgRNA {
     my $counter = 0;
     $counter += () = $seq1 =~ /$c_sg.GG/;
     $counter += () = (reverse_complement($seq1) =~ /$c_sg.GG/);
-    print $counter,"\n";
+    #print $counter,"\n";
     if ($counter > 1){
         return ("non-unique","non-unique");
     }

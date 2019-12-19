@@ -49,7 +49,7 @@ sub find_pbs {
 ##############################################################################
 # Finally, we design the RT template
 sub find_RT {
-    my ($align2,$chosenOrientation,$minEditPos,$maxEditPos,$chosenCutPos) = @_;
+    my ($align2,$chosenOrientation,$minEditPos,$maxEditPos,$chosenCutPos,$wtdelcounter) = @_;
     my $minimalEditLen; #holds the distance from sgRNA cut to farthest edit, using the alignment coordinates
         
     #pull out the DNA sequence in between the +1 cut site position and $maxEditPos from Sequence 2 alignment
@@ -58,12 +58,11 @@ sub find_RT {
         $minimalEditLen = $maxEditPos-$chosenCutPos+1; #distance from sgRNA cut to farthest edited base
     }
     elsif ($chosenOrientation eq "antisense"){
-        $minimalEditLen = $chosenCutPos-$minEditPos+1; #distance from sgRNA cut to farthest edited base
+        $minimalEditLen = $chosenCutPos-$minEditPos+1-$wtdelcounter; #distance from sgRNA cut to farthest edited base. 
     }
-    #print "$minimalEditLen\n";
+    print "minimal edit length: $minimalEditLen\n";
 
     #Get the number of deleted bases in $align2, since we need to remove those for calculating the RT template length ($minimalRTLen)
-
     my $delCounter = 0;
     for (my $i = 0; $i < scalar @seq2chars; $i++){
         if ($seq2chars[$i] eq "-"){
@@ -77,7 +76,7 @@ sub find_RT {
     my %rthash; # hash that stores the candidate RT templates
     my %allrthash; #hash that stores all candidate RT templates, irrespective of 'C' ending
     my @rtlengths; # array that stores the lengths of the candidate RT templates
-    my $rttable = '<table style ="width:40%; float = left">';
+    my $rttable = '<table style ="width:50%; float = left">';
     $rttable .= "<tr><th>Length</th><th>TemplateSequence</th><th>Warnings</th>";
     my $rtcounter = 0; #counts how many templates have been found that do not have 'C' ending.
 
@@ -161,7 +160,7 @@ sub find_RT {
             for (my $i = 10; $i < 16; $i++){
                 my $align2Copy = $align2;
                 $align2Copy =~ s/-//g;
-                my $templateSeq = substr($align2Copy,$chosenCutPos-$i-1,$i); # holds the sequence of the cDNA that will synthesized by the RT
+                my $templateSeq = substr($align2Copy,($chosenCutPos-$delCounter+$wtdelcounter)-$i,$i); # holds the sequence of the cDNA that will synthesized by the RT
                 my $rcTemplate = $templateSeq; # holds the sequence of the RT template, used for cDNA synthesis. Use this for the pegRNA sequences
                 print "$i\t$templateSeq\t$rcTemplate\t";
                 $rttable .= "<tr><td>$i</td><td>$rcTemplate</td>";
@@ -192,7 +191,7 @@ sub find_RT {
             for (my $i = $minimalRTLen+1; $i < $minimalRTLen+7; $i++){
                 my $align2Copy = $align2;
                 $align2Copy =~ s/-//g;
-                my $templateSeq = substr($align2Copy,$chosenCutPos-$i-1,$i); # holds the sequence of the cDNA that will synthesized by the RT
+                my $templateSeq = substr($align2Copy,($chosenCutPos-$delCounter+$wtdelcounter)-$i,$i); # holds the sequence of the cDNA that will synthesized by the RT
                 my $rcTemplate = $templateSeq; # holds the sequence of the RT template, used for cDNA synthesis. Use this for the pegRNA sequences
                 print "$i\t$templateSeq\t$rcTemplate\t";
                 $rttable .= "<tr><td>$i</td><td>$rcTemplate</td>";
