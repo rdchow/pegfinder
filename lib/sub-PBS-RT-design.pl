@@ -58,7 +58,8 @@ sub find_RT {
         $minimalEditLen = $maxEditPos-$chosenCutPos+1; #distance from sgRNA cut to farthest edited base
     }
     elsif ($chosenOrientation eq "antisense"){
-        $minimalEditLen = $chosenCutPos-$minEditPos+1-$wtdelcounter; #distance from sgRNA cut to farthest edited base. 
+        $minimalEditLen = $chosenCutPos-$minEditPos+1+$wtdelcounter;
+        #$minimalEditLen = $chosenCutPos-$minEditPos+1-$wtdelcounter; #distance from sgRNA cut to farthest edited base. 
     }
     print "minimal edit length: $minimalEditLen\n";
 
@@ -85,7 +86,7 @@ sub find_RT {
         if ($minimalEditLen < 10){
             print "The edit distance is < 10 nt ($minimalEditLen nt), with $delCounter deletion base(s). Extracting all 10-16nt RT templates:\n";
             print "Length\tSenseSequence\tTemplate_Seq\tWarnings\n";
-            for (my $i = 10; $i < 16; $i++){
+            for (my $i = 10; $i <= 16; $i++){
                 my $align2Copy = $align2;
                 $align2Copy =~ s/-//g;
                 my $templateSeq = substr($align2Copy,$chosenCutPos-1,$i); # holds the sequence of the cDNA that will synthesized by the RT
@@ -157,7 +158,7 @@ sub find_RT {
         if ($minimalEditLen < 10){
             print "The edit distance is < 10 nt ($minimalEditLen nt), with $delCounter deletion base(s).\nExtracting all 10-16nt RT templates:\n";
             print "Length\tSenseSequence\tTemplateSequence\tWarnings\n";
-            for (my $i = 10; $i < 16; $i++){
+            for (my $i = 10; $i <= 16; $i++){
                 my $align2Copy = $align2;
                 $align2Copy =~ s/-//g;
                 my $templateSeq = substr($align2Copy,($chosenCutPos-$delCounter+$wtdelcounter)-$i,$i); # holds the sequence of the cDNA that will synthesized by the RT

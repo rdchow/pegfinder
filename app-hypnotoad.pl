@@ -268,6 +268,9 @@ post '/upload' => sub {
     if (defined $sgfile && ($data_text ne "" || $sgfoundStatus == 2)){
       if ($pe3Bool == 0){
         $c->render(text=>"
+          <head>
+          <link rel=\"icon\" href=\"/images/favicon.png\">
+          <title>pegFinder: pegRNA designer for Prime Editing</title></head>
         <img src=\"/images/logo4.png\" height=\"100\" width=\"379\" />
         <br><br><hr><br>
         <style>table, th, td {border: 1px solid black;}
@@ -304,6 +307,9 @@ post '/upload' => sub {
       elsif (defined $chosenNickSG){
         if ($chosenNickSG ne ""){
           $c->render(text=>"
+          <head>
+          <link rel=\"icon\" href=\"/images/favicon.png\">
+          <title>pegFinder: pegRNA designer for Prime Editing</title></head>
         <img src=\"/images/logo4.png\" height=\"100\" width=\"379\" />
         <br><br><hr><br>
         <style>table, th, td {border: 1px solid black;}
@@ -358,6 +364,7 @@ __DATA__
 <!DOCTYPE html>
 <html>
   <head>
+  <link rel="icon" href="/images/favicon.png">
   <title>pegFinder: pegRNA designer for Prime Editing</title></head>
   <document.getElementById('sgRNA').value='';
   <body>
