@@ -8,20 +8,20 @@ sub needleman_wunsch {
     my ($seq1, $seq2) = @_;
 
     # scoring scheme
-    my $MATCH    =  1; # +1 for letters that match
-    my $MISMATCH = -1; # -1 for letters that mismatch
-    my $GAP      = -1; # -1 for any gap
+    my $match    =  1; # +1 for bases that match
+    my $mismatch = -1; # -1 for bases that mismatch
+    my $gap      = -1; # -1 for any gap
 
     # initialization
     my @matrix;
     $matrix[0][0]{score}   = 0;
     $matrix[0][0]{pointer} = "none";
     for(my $j = 1; $j <= length($seq1); $j++) {
-        $matrix[0][$j]{score}   = $GAP * $j;
+        $matrix[0][$j]{score}   = $gap * $j;
         $matrix[0][$j]{pointer} = "left";
     }
     for (my $i = 1; $i <= length($seq2); $i++) {
-        $matrix[$i][0]{score}   = $GAP * $i;
+        $matrix[$i][0]{score}   = $gap * $i;
         $matrix[$i][0]{pointer} = "up";
     }
 
@@ -34,15 +34,15 @@ sub needleman_wunsch {
             my $letter1 = substr($seq1, $j-1, 1);
             my $letter2 = substr($seq2, $i-1, 1);                            
             if ($letter1 eq $letter2) {
-                $diagonal_score = $matrix[$i-1][$j-1]{score} + $MATCH;
+                $diagonal_score = $matrix[$i-1][$j-1]{score} + $match;
             }
             else {
-                $diagonal_score = $matrix[$i-1][$j-1]{score} + $MISMATCH;
+                $diagonal_score = $matrix[$i-1][$j-1]{score} + $mismatch;
             }
 
             # calculate gap scores
-            $up_score   = $matrix[$i-1][$j]{score} + $GAP;
-            $left_score = $matrix[$i][$j-1]{score} + $GAP;
+            $up_score   = $matrix[$i-1][$j]{score} + $gap;
+            $left_score = $matrix[$i][$j-1]{score} + $gap;
 
             # choose best score
             if ($diagonal_score >= $up_score) {
@@ -103,7 +103,7 @@ sub needleman_wunsch {
     #Detect if the 5' or 3' ends of the two sequences are not aligned exactly
     #first look at 5' ends
     my $trimmingStatus5p = 0; 
-    # ^ variable that tracks 5' trimming needs. 0: no trimming, 1:trimming wildtype seq, 2: trimming edited seq
+    # ^ variable that tracks 5' trimming needs. 0: no trimming, 1:trimmed wildtype seq, 2: trimmed edited seq
     my @chars1 = split("",$align1);
     my @chars2 = split("",$align2);
 
@@ -116,7 +116,7 @@ sub needleman_wunsch {
     
     #now look at 3' ends
     my $trimmingStatus3p = 0; 
-    # ^ variable that tracks 5' trimming needs. 0: no trimming, 1:trimming wildtype seq, 2: trimming edited seq
+    # ^ variable that tracks 3' trimming needs. 0: no trimming, 1:trimmed wildtype seq, 2: trimmed edited seq
     if ($chars1[-1] eq "-"){
         $trimmingStatus3p = 1;
     }
@@ -124,7 +124,7 @@ sub needleman_wunsch {
         $trimmingStatus3p = 2;
     }
     my $wtdelcounter = 0; # counts how many gaps are in the wildtype alignment; need for calculating the edit distance
-    #look at the alterations
+    
     my %alterhash; #Stores the alterations to generate sequence 2; 1-based coordinates
     for (my $i = 0; $i < length $align1; $i++){     
         if ($chars1[$i] ne $chars2[$i]){
