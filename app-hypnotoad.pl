@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use Mojolicious::Lite;
 #plugin AutoReload => {};
-require "./lib/sub-needleman-wunsch.pl";
+require "./lib/sub-needleman-wunsch.affine.pl";
 require "./lib/sub-sgRNA-finder.pl";
 require "./lib/sub-sgRNA-validator.pl";
 require "./lib/sub-PBS-RT-design.pl";
