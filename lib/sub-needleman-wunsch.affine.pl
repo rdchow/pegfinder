@@ -22,7 +22,7 @@ sub needleman_wunsch {
     my $score = $matcher->align($arr1,$arr2,
         {   align   => sub {unshift @a_align, $arr1->[shift]; unshift @b_align, $arr2->[shift]},
             shift_a => sub {unshift @a_align, $arr1->[shift]; unshift @b_align,'-'},
-            shift_b => sub {unshift @a_align,'-'; unshift @b_align, $arr1->[shift]},
+            shift_b => sub {unshift @a_align,'-'; unshift @b_align, $arr2->[shift]},
         });
 
     my $align1 = "@a_align";

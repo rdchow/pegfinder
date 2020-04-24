@@ -225,8 +225,8 @@ sub find_RT {
 
     #Choose the median size of all candidate RT templates in %rthash
     my $midRTindex;
-    if (scalar @rtlengths %2 == 0){ #if even number of candidates, choose the shorter of the two
-        $midRTindex = $rtlengths[(scalar(@rtlengths)/2)-1];
+    if (scalar @rtlengths %2 == 0){ #if even number of candidates, choose the longer of the two
+        $midRTindex = $rtlengths[(scalar(@rtlengths)/2)];
     }
     else { #if odd number of candidates, choose the median size
         $midRTindex = $rtlengths[(scalar(@rtlengths)/2)-0.5];

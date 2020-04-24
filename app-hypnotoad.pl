@@ -38,6 +38,9 @@ post '/upload' => sub {
     return $c->render(text => 'Edited/desired sequence is invalid. Please enter only DNA sequence in plaintext format.', status => 200)
     unless $edit =~ /\A[ACGT]+\z/i;
 
+  #check if wt and edit are the same
+  if ($wt eq $edit){ return $c->render(text=>'Wildtype and edited sequence are identical. Please reenter the form.', status=>200);}
+
   #Needleman-Wunsch alignment of the two sequences
   my $seq1 = uc($wt);
   my $seq2 = uc($edit);
@@ -51,11 +54,11 @@ post '/upload' => sub {
   
   #if alignments are gapped at the 5' or 3' ends, send error message
   if ($trimmingStatus5p != 0 || $trimmingStatus3p != 0){
-     return $c->render(text => 'Wildtype and desired sequence are not aligned on the 5\' or 3\' ends.<br>Please trim off the hanging DNA bases and rerun pegFinder (see alignment below). <br><br>If you used Broad sgRNA results, please also rerun the Broad sgRNA finder using the revised wildtype sequence (if modified). <br><hr><br>Wildtype:<br>'.$align1f.'<br><br>Edited:<br>'.$align2f.'<br> ', status => 200);
+     return $c->render(text => 'Wildtype and desired sequence are not aligned on the 5\' or 3\' ends.<br>Please trim off the hanging DNA bases and rerun pegFinder (see alignment below). <br><br>If you used sgRNA finder results (Broad or CRISPRScan), please also rerun the sgRNA finders using the revised wildtype sequence (if modified). <br><hr><br>Wildtype:<br>'.$align1f.'<br><br>Edited:<br>'.$align2f.'<br> ', status => 200);
   }
 
   #Process the sgRNA input
-  #Can either take a file upload or a chosen sgRNA
+  #Can either take a file upload, a chosen sgRNA, or nothing
   my $sgfile = $c->param('sgRNA');
   my $c_sg = $c->param('c_sgRNA');
   my $pe3Bool; # whether to search for PE3 sgRNAs
@@ -67,16 +70,71 @@ post '/upload' => sub {
   }
 
   my ($chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg, %sghash, $sghashpt, $data_text,$sgfoundStatus, $maxEditDistance, $chosenNickSGPos,$chosenNickSG,$chosenNickSGDist,$nicksghashpt, %nicksghash,$chosenNickOrientation); # declare all the variables
+
   $maxEditDistance = 150; # only consider sgRNAs if they cut within 150 nt of the desired edit
   my $sgtable = '<table style ="width:50%">';
   my $nicksgtable = '<table style ="width:50%">';
 
-  return $c->redirect_to('form') unless ($sgfile ne ""|| $c_sg ne "");  #check whether user submitted any sgRNA information
+  #return $c->redirect_to('form') unless ($sgfile ne "" || $c_sg ne "");  #check whether user submitted any sgRNA information
+
   return $c->render(text => 'Input is too big. Try reducing sequence length.', status => 200)
     if $c->req->is_limit_exceeded; # Check input size
 
-  #if sgRNA was pre-chosen:
-  if (defined $c_sg && $c_sg ne ""){
+  ###### Case 1: User does not submit sgRNA file, or a chosen sgRNA ##########
+  if ( $c_sg eq "" && $sgfile->asset->slurp eq ""){
+    my @sgdata = find_choose_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter);
+    #$c->render(text => 'test.', status => 200);
+
+    #if no sgRNAs were found, report back
+    return $c->render(text => 'No candidate sgRNAs found.', status => 200)
+      unless ($sgdata[0] ne "none");
+      
+    #Otherwise, if an sgRNA was found:
+    ($sghashpt,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg) = @sgdata;
+    %sghash = %$sghashpt;
+    $sgfoundStatus = 2;
+    $sgtable .= "<tr><th>sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceToEditStart</th><th>Chosen</th></tr>";
+    foreach my $k (sort {abs($sghash{$a}[4])<=>abs($sghash{$b}[4])} keys %sghash){
+      $sgtable .= "<tr><td>$k</tdh><td>$sghash{$k}[3]</td><td>$sghash{$k}[1]</td><td>$sghash{$k}[4]</td>";
+      if ($k eq $chosenSG){
+        $sgtable .= "<td>X</td></tr>";
+      }
+      else { 
+        $sgtable .= "<td></td></tr>";
+      }
+    }
+    $sgtable .= "</table>";
+  
+    if ($pe3Bool == 1){ # check mark for finding PE3 secondary guides
+      my @nickdata = find_choose_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation);
+      ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
+      if ($chosenNickSG ne "none found"){ # if a PE3 sgRNA was found
+        %nicksghash = %$nicksghashpt;
+
+        $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceToPrimary_sgRNACut</th><th>Chosen</th></tr>";
+        foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
+          $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash{$k}[1]</td><td>$nicksghash{$k}[2]</td><td>$nicksghash{$k}[3]</td>";
+          if ($k eq $chosenNickSG){
+            $nicksgtable .= "<td>X</td></tr>";
+          }
+          else { 
+              $nicksgtable .= "<td></td></tr>";
+          }
+        }
+      }
+      else {
+        $nicksgtable .= '<tr><br>No secondary nicking sgRNA found</tr>';
+      }
+      $nicksgtable .= "</table>";
+    }
+  }
+
+
+
+
+
+  ###### Case 2: sgRNA was pre-chosen: #######
+  elsif (defined $c_sg && $c_sg ne ""){
     #if an sgRNA file was uploaded:
     my $boolfile = 0; #tells us if the uploaded sgRNA file is the expected output. 0: invalid/absent, 1: Broad, 2: CRISPRscan
     $data_text = $sgfile->asset->slurp;
@@ -90,39 +148,54 @@ post '/upload' => sub {
     else { # if sgRNAs looks plausible:
       #if sgRNA is not in the wildtype sequence:
       if ($seq1 !~ /$c_sg.GG/ && reverse_complement($seq1) !~ /$c_sg.GG/ ){
-        return $c->render(text => 'Preselected sgRNA is not present in wildtype sequence (using NGG PAM). Please use a different sgRNA or use an sgRNA finder (Broad, CRISPRscan) and upload the results.', status => 200);
+        return $c->render(text => 'Preselected sgRNA is not present in wildtype sequence (using NGG PAM). Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.', status => 200);
       }
       #if sgRNA is present in wildtype sequence:
       else {
         my @sgdata = process_chosen_sgRNA($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter);
 
         #if the chosen sgRNA matches to multiple positions, report back
-        return $c->render(text => 'Preselected sgRNA matches to multiple positions in wildtype sequence. Please use a different sgRNA or use an sgRNA finder (Broad, CRISPRscan) and upload the results.', status => 200)
+        return $c->render(text => 'Preselected sgRNA matches to multiple positions in wildtype sequence. Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.', status => 200)
           unless ($sgdata[0] ne "non-unique");
 
         ($chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,$sgfoundStatus) = @sgdata;
         if ($sgfoundStatus == 0){ # if the preselected sgRNA is incompatible
-           return $c->render(text=>'Preselected sgRNA is incompatible with desired edit: it cuts 3\' (downstream) of the alterations. Please use a different sgRNA or an sgRNA finder (Broad, CRISPRscan) and upload the results.');
+           return $c->render(text=>'Preselected sgRNA is incompatible with desired edit: it cuts 3\' (downstream) of the alterations. Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.');
         }
         elsif ($sgfoundStatus == 1){
-           return $c->render(text=>'Preselected sgRNA cuts >'.$maxEditDistance.'nt from the desired edits, and is predicted to be lower efficiency. <br>Please choose a different sgRNA or use an sgRNA finder (Broad, CRISPRscan) and upload the results.');
+           return $c->render(text=>'Preselected sgRNA cuts >'.$maxEditDistance.'nt from the desired edits, and is predicted to be lower efficiency. <br>Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.');
         }
         $sgtable .= "<tr><th>sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceToEditStart</th><th>Chosen</th></tr>";
         $sgtable .= "<tr><td>$c_sg</td><td>$chosenCutPos</td><td>$chosenOrientation</td><td>$chosenDistance</td><td>X</td></tr>";
         $sgtable .= "</table>";
 
         #evaluate whether we need to find PE3 secondary sgRNAs
-
         if ($pe3Bool == 1){ # check mark for finding PE3 secondary guides
           if (defined $sgfile && $data_text ne ""){
             $boolfile = validate_sgRNA($data_text,"100");#Validate the sgRNA file
           }
-          else { # if sgRNA file is missing:
-            $c->render(text => 'sgRNA finder results file is absent. Please use the results file from the Broad sgRNA designer or CRISPRscan, or rerun without searching for PE3 secondary sgRNAs.', status => 200);
-          }
 
-          if ($boolfile == 0){ #if the file is invalid
-              $c->render(text => 'sgRNA file is invalid. Please use the results file from the Broad sgRNA designer or CRISPRscan, or rerun without searching for PE3 secondary sgRNAs.', status => 200);
+          if ($boolfile == 0 || $data_text eq ""){ #if the file is invalid or absent, use the standalone subroutine
+            my @nickdata = find_choose_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation);
+            ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
+            if ($chosenNickSG ne "none found"){ # if a PE3 sgRNA was found
+              %nicksghash = %$nicksghashpt;
+
+              $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceToPrimary_sgRNACut</th><th>Chosen</th></tr>";
+              foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
+                $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash{$k}[1]</td><td>$nicksghash{$k}[2]</td><td>$nicksghash{$k}[3]</td>";
+                if ($k eq $chosenNickSG){
+                  $nicksgtable .= "<td>X</td></tr>";
+                }
+                else { 
+                    $nicksgtable .= "<td></td></tr>";
+                }
+              }
+            }
+            else {
+              $nicksgtable .= '<tr><br>No suitable secondary nicking sgRNA found</tr>';
+            }
+            $nicksgtable .= "</table>";
           }
 
           elsif ($boolfile == 1) {#if the sgRNA file is a valid Broad file
@@ -143,7 +216,7 @@ post '/upload' => sub {
               }
             }
             else {
-              $nicksgtable .= '<tr><br>No secondary nicking sgRNA found</tr>';
+              $nicksgtable .= '<tr><br>No suitable secondary nicking sgRNA found</tr>';
             }
             $nicksgtable .= "</table>";
           }
@@ -166,7 +239,7 @@ post '/upload' => sub {
               }
             }
             else {
-              $nicksgtable .= '<tr><br>No nicking sgRNA found</tr>';
+              $nicksgtable .= '<tr><br>No suitable nicking sgRNA found</tr>';
             }
             $nicksgtable .= "</table>";
           }
@@ -175,15 +248,10 @@ post '/upload' => sub {
     }
   }
 
-  #if the sgRNA was not pre-chosen:
-  else {
+  ###### Case 3: sgRNA was not pre-chosen, and a sgRNA designer file was uploaded: #######
+  elsif ($sgfile ne "" && defined $sgfile){
     my $boolfile = 0; #tells us if the uploaded sgRNA file is valid
     $data_text = $sgfile->asset->slurp;
-
-    #if no sgRNA file was uploaded:
-    if(!defined $data_text || $data_text eq ""){
-      $c->render(text => 'No preselected sgRNA or sgRNA finder results were included. Please resubmit the form.', status => 200);
-    }
 
     #if an sgRNA file was uploaded:
     if (defined $sgfile && $data_text ne ""){
@@ -191,7 +259,7 @@ post '/upload' => sub {
       $boolfile = validate_sgRNA($data_text,"100");
     }
     if ($boolfile eq "0"){
-        $c->render(text => 'sgRNA file is invalid or absent. Please use the results file from the Broad sgRNA designer or CRISPRscan on the wildtype sequence, or enter a preselected sgRNA.', status => 200);
+        $c->render(text => 'sgRNA file is invalid or absent. Please do one of the following: 1) Upload the results file from the Broad sgRNA designer or CRISPRscan on the wildtype sequence, 2) Enter a preselected sgRNA, or 3) Rerun pegFinder and do not upload a results file.', status => 200);
     }
 
     if ($boolfile == 1){ #if valid sgRNA file: Broad 
@@ -319,8 +387,15 @@ post '/upload' => sub {
     my $oligotable ='<table style ="width:80%; float = left">';
     $oligotable .= "<tr><th>OligoName</th><th>Sequence</th><th>Description</th></tr>";
 
-    $oligotable .= '<tr><td>sgF</td><td>caccg'.$chosenSG.'gttttaga</td><td>sgRNA, forward</tr>';
-    $oligotable .= '<tr><td>sgR</td><td>tagctctaaaac'.reverse_complement($chosenSG).'c</td><td>sgRNA, reverse</td></tr>';
+    if (substr($chosenSG,0,1) eq "G"){
+      $oligotable .= '<tr><td>sgF</td><td>cacc'.$chosenSG.'gttttaga</td><td>sgRNA, forward</tr>';
+      $oligotable .= '<tr><td>sgR</td><td>tagctctaaaac'.reverse_complement($chosenSG).'</td><td>sgRNA, reverse</td></tr>';
+    }
+    else {
+      $oligotable .= '<tr><td>sgF</td><td>caccg'.$chosenSG.'gttttaga</td><td>sgRNA, forward</tr>';
+      $oligotable .= '<tr><td>sgR</td><td>tagctctaaaac'.reverse_complement($chosenSG).'c</td><td>sgRNA, reverse</td></tr>';      
+    }
+    
     $oligotable .= '<tr><td>scaffF</td><td>GCTAGAAATAGCAAGTTAAAATAAGGCTAGTCCGTTATCAACTTGAAAAAGTGGCACCGAGTCG</td><td>Scaffold, forward (invariant)</td></tr>';
     $oligotable .= '<tr><td>scaffR</td><td>GCACCGACTCGGTGCCACTTTTTCAAGTTGATAACGGACTAGCCTTATTTTAACTTGCTATTTC</td><td>Scaffold, reverse (invariant)</td></tr>';
     $oligotable .= '<tr><td>extensF</td><td>gtgc'.$extension.'</td><td>3\' extension, forward</td></tr>';
@@ -329,15 +404,22 @@ post '/upload' => sub {
     #if a PE3 nicking sgRNA was chosen:
     if ($pe3Bool == 1 && defined $chosenNickSG){
       if ($chosenNickSG ne "none found"){
-        $oligotable .= '<tr><td>nick_sgF</td><td>caccg'.$chosenNickSG.'</td><td>PE3 nick sgRNA, forward</td></tr>';
-        $oligotable .= '<tr><td>nick_sgF</td><td>aaac'.reverse_complement($chosenNickSG).'c</td><td>PE3 nick sgRNA, reverse</td></tr>';
+        if (substr($chosenNickSG,0,1) eq "G"){
+          $oligotable .= '<tr><td>nick_sgF</td><td>cacc'.$chosenNickSG.'</td><td>PE3 nick sgRNA, forward</td></tr>';
+          $oligotable .= '<tr><td>nick_sgR</td><td>aaac'.reverse_complement($chosenNickSG).'</td><td>PE3 nick sgRNA, reverse</td></tr>';
+        }
+        else {
+          $oligotable .= '<tr><td>nick_sgF</td><td>caccg'.$chosenNickSG.'</td><td>PE3 nick sgRNA, forward</td></tr>';
+          $oligotable .= '<tr><td>nick_sgR</td><td>aaac'.reverse_complement($chosenNickSG).'c</td><td>PE3 nick sgRNA, reverse</td></tr>';
+        }
+        
       }
     }
 
     $oligotable .= '</table>';
 
     #Print the output:
-    if (defined $sgfile && ($data_text ne "" || $sgfoundStatus == 2)){
+    if ($sgfoundStatus == 2){
       if ($pe3Bool == 0){
         $c->render(text=>"
           <head>
@@ -437,8 +519,21 @@ __DATA__
 <!DOCTYPE html>
 <html>
   <head>
-  <link rel="icon" href="/images/favicon.png">
-  <title>pegFinder: pegRNA designer for Prime Editing</title></head>
+    <link rel="icon" href="/images/favicon.png">
+    <title>pegFinder: pegRNA designer for Prime Editing</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+    <script>
+      $(document).ready(function() {
+        $('#clear').on('click',function (e) {
+            var $el = $('#sgRNAControl');
+            $el.wrap('<form>').closest(
+                'form').get(0).reset();
+            $el.unwrap();
+        });
+      });
+    </script> 
+  </head>
+  
   <document.getElementById('sgRNA').value='';
   <body>
   <style>
@@ -454,25 +549,27 @@ __DATA__
       <br><br>Edited/desired sequence <br>
       %= text_area 'edited', cols => 80, rows => 5, maxlength => 10000, placeholder => 'Edited/desired DNA sequence in plaintext. Must share 5\' and 3\' ends with the wildtype sequence. Recommend >100 bp flanks around target edit.'
       <br>
-      <br>Upload <a href="https://portals.broadinstitute.org/gpp/public/analysis-tools/sgrna-design"> Broad sgRNA finder </a> or <a href="https://www.crisprscan.org/?page=sequence"> CRISPRscan </a>results (tab-delimited file): &nbsp;&nbsp;&nbsp;  
-      %= file_field 'sgRNA'
-      <br>Use the wildtype sequence as input and make sure to report all possible sgRNAs. <br>
-      (<b>Required</b> for designing PE3 secondary nicking sgRNA) <br> <br>
-      
-      (Optional) Use a preselected sgRNA: 
-      %=text_field 'c_sgRNA', placeholder => 'Preselected sgRNA sequence', size=>29
-      <br><br>
-      Find PE3 secondary nicking sgRNAs: &nbsp;
+      <br>Find PE3 secondary nicking sgRNAs: &nbsp;
      
       %=radio_button 'PE3cb', value => 1
       Yes&nbsp;&nbsp;&nbsp
       %=radio_button 'PE3cb', value => 0
-      No<br><br>
+      No<br>
+     
+      <br>(Optional) Upload <a href="https://portals.broadinstitute.org/gpp/public/analysis-tools/sgrna-design"> Broad sgRNA finder </a> or <a href="https://www.crisprscan.org/?page=sequence"> CRISPRscan </a>results: &nbsp;&nbsp;&nbsp;  
+      %= file_field 'sgRNA', id => 'sgRNAControl', value => ''
+      <button id = "clear" type="button"> Clear </button>
+      <br>Use the wildtype sequence as input and report all possible sgRNAs. <br> <br>
+      
+      (Optional) Use a preselected sgRNA: 
+      %=text_field 'c_sgRNA', placeholder => 'Preselected sgRNA sequence', size=>29
+      <br><br>
       %= submit_button 'Design pegRNAs'
       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp &nbsp;&nbsp;&nbsp;&nbsp;&nbsp
       <input type="reset" value="Reset" align="right" />
       
-    % end 
+    % end
+
   </body>
 
   <footer>

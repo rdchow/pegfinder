@@ -581,6 +581,179 @@ sub process_chosen_sgRNA {
         return ($chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,$sgfoundStatus);
     }
 }
+
+sub find_choose_sgRNA {
+    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance, $wtdelcounter) = @_;
+    my $chosenOrientation;
+    my $chosenSG;
+    my $chosenCutPos;
+    my $chosenDistance;
+    my $gcPctg;
+    my %sghash;
+
+    #find all candidate spacers in the wildtype sequence
+    my @chars = split ("",$seq1);
+
+    #first check sense orientation:
+    for (my $i = 21; $i < scalar @chars; $i++){
+        my $tempsg;
+        if ($chars[$i] eq "G" && $chars[$i+1] eq "G"){
+            for (my $k = $i-21; $k <= $i-2; $k++){
+                $tempsg .= $chars[$k];
+            }
+            
+            #calculate GC content of the sgRNA
+            my @sgbases = split ("",$tempsg);
+            my $gcCounter = 0;
+            for (my $j = 0; $j < scalar @sgbases; $j++){
+                if ($sgbases[$j] eq "G" || $sgbases[$j] eq "C"){
+                    $gcCounter++;
+                }
+            }
+            my $tempgcPctg = $gcCounter / scalar (@sgbases) * 100;
+
+            #determine cut position and distance to edit
+            $seq1 =~ /$tempsg.GG/;
+            my $tempCutPos = $-[0]+18;
+            my $tempDistance = $minEditPos-$tempCutPos;
+
+            if ($minEditPos >= $tempCutPos && $maxEditPos <= ($tempCutPos+$maxEditDistance)){
+                $sghash{$tempsg} = [$tempsg, "sense", $tempgcPctg,$tempCutPos,$tempDistance];
+            }
+        }
+    }
+
+    #now check antisense orientation:
+    for (my $i = 0; $i < scalar @chars-22; $i++){
+        my $tempsg;
+        if ($chars[$i] eq "C" && $chars[$i+1] eq "C"){
+            for (my $k = $i+3; $k <= $i+22; $k++){
+                $tempsg .= $chars[$k];
+            }
+            $tempsg = reverse_complement($tempsg);
+            #calculate GC content of the sgRNA
+            my @sgbases = split ("",$tempsg);
+            my $gcCounter = 0;
+            for (my $j = 0; $j < scalar @sgbases; $j++){
+                if ($sgbases[$j] eq "G" || $sgbases[$j] eq "C"){
+                    $gcCounter++;
+                }
+            }
+            my $tempgcPctg = $gcCounter / scalar (@sgbases) * 100;
+
+            #determine cut position and distance to edit
+            my $rc_tempsg = reverse_complement($tempsg);
+            $seq1 =~ /CC.$rc_tempsg/;
+            my $tempCutPos = $-[0]+6;
+            my $tempDistance = ($tempCutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases
+            if ($minEditPos >= ($tempCutPos-$maxEditDistance) && $maxEditPos <= ($tempCutPos+$wtdelcounter)){
+                $sghash{$tempsg} = [$tempsg, "antisense", $tempgcPctg,$tempCutPos,$tempDistance];
+            }
+        }
+    }
+
+    # %sghash holds all identified sgRNAs that are candidates for the desired edit.
+    # choose a single sgRNA that is closest to the edit site
+    my $sgfoundStatus = 0;
+    if (scalar keys %sghash > 0){
+        foreach my $k (sort { abs($sghash{$a}[4]) <=> abs($sghash{$b}[4]) } keys %sghash){
+            if ($sgfoundStatus == 0){
+                $chosenSG = $k;
+                $chosenCutPos = $sghash{$k}[3];
+                $chosenDistance = $sghash{$k}[4];
+                $chosenOrientation = $sghash{$k}[1];
+                $gcPctg = $sghash{$k}[2];
+                $sgfoundStatus++;
+            }
+        }
+        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg);
+    }
+    # if no candidate sgRNA found, return value stating none
+    else {
+        my $val = "none";
+        return($val,$val);
+    }
+}
+
+
+# if no sgRNA designer file uploaded, design nicking sgRNA
+sub find_choose_nick_sgRNA{
+    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation) = @_;
+    my $chosenNickOrientation;
+    my $chosenNickSG;
+    my $chosenNickSGPos;
+    my $chosenNickSGDist;
+    my %nicksghash;
+
+    #find all candidate spacers in the wildtype sequence
+    my @chars = split ("",$seq1);
+
+    #if chosen sgRNA is antisense, look for sense sgRNAs for PE3:
+    if ($chosenOrientation eq "antisense"){
+        for (my $i = 21; $i < scalar @chars; $i++){
+            my $tempsg;
+            if ($chars[$i] eq "G" && $chars[$i+1] eq "G"){
+                for (my $k = $i-21; $k <= $i-2; $k++){
+                    $tempsg .= $chars[$k];
+                }
+                #determine cut position and distance to primary sgRNA cut
+                $seq1 =~ /$tempsg.GG/;
+                my $tempCutPos = $-[0]+18;
+                my $tempDistance = $chosenCutPos-$tempCutPos-1;
+
+                if ((abs($tempDistance)>=20) && (abs($tempDistance) <= 100)){
+                    $nicksghash{$tempsg} = [$tempsg, $tempCutPos,"sense", $tempDistance];
+                }
+            }
+        }
+    }
+    #else, if chosen sgRNA is sense, look for antisense sgRNAs for PE3:
+    if ($chosenOrientation eq "sense"){
+    #now check antisense orientation:
+    for (my $i = 0; $i < scalar @chars-22; $i++){
+        my $tempsg;
+        if ($chars[$i] eq "C" && $chars[$i+1] eq "C"){
+            for (my $k = $i+3; $k <= $i+22; $k++){
+                $tempsg .= $chars[$k];
+            }
+            $tempsg = reverse_complement($tempsg);
+        
+            #determine cut position and distance to primary sgRNA cut
+            my $rc_tempsg = reverse_complement($tempsg);
+            $seq1 =~ /CC.$rc_tempsg/;
+            my $tempCutPos = $-[0]+6;
+            ####TEST LINE###
+            my $tempDistance = $tempCutPos-$chosenCutPos+1;
+            if ((abs($tempDistance)>=20) && (abs($tempDistance) <= 100) ){
+                $nicksghash{$tempsg} = [$tempsg,$tempCutPos,"antisense",$tempDistance];
+            }
+        }
+    }
+
+    if (scalar keys %nicksghash > 0){
+        #choose the nicking sgRNA that is closest to 50bp from the primary nick
+            my $ctt = 0;
+            foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
+                if ($ctt == 0){
+                    $chosenNickSG = $k;
+                    $chosenNickSGPos = $nicksghash{$k}[1];
+                    $chosenNickOrientation = $nicksghash{$k}[2];
+                    $chosenNickSGDist = $nicksghash{$k}[3];
+                }
+                $ctt++;
+            }
+                
+            return ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,\%nicksghash);
+        }
+        
+        # if no candidate nicking sgRNA found, return value stating none
+        else {
+            return("none found","none");
+        }
+    }
+}
+
+
 sub reverse_complement {
         my $dna = shift;
 
