@@ -707,49 +707,50 @@ sub find_choose_nick_sgRNA{
             }
         }
     }
+
     #else, if chosen sgRNA is sense, look for antisense sgRNAs for PE3:
     if ($chosenOrientation eq "sense"){
     #now check antisense orientation:
-    for (my $i = 0; $i < scalar @chars-22; $i++){
-        my $tempsg;
-        if ($chars[$i] eq "C" && $chars[$i+1] eq "C"){
-            for (my $k = $i+3; $k <= $i+22; $k++){
-                $tempsg .= $chars[$k];
-            }
-            $tempsg = reverse_complement($tempsg);
-        
-            #determine cut position and distance to primary sgRNA cut
-            my $rc_tempsg = reverse_complement($tempsg);
-            $seq1 =~ /CC.$rc_tempsg/;
-            my $tempCutPos = $-[0]+6;
-            ####TEST LINE###
-            my $tempDistance = $tempCutPos-$chosenCutPos+1;
-            if ((abs($tempDistance)>=20) && (abs($tempDistance) <= 100) ){
-                $nicksghash{$tempsg} = [$tempsg,$tempCutPos,"antisense",$tempDistance];
+        for (my $i = 0; $i < scalar @chars-22; $i++){
+            my $tempsg;
+            if ($chars[$i] eq "C" && $chars[$i+1] eq "C"){
+                for (my $k = $i+3; $k <= $i+22; $k++){
+                    $tempsg .= $chars[$k];
+                }
+                $tempsg = reverse_complement($tempsg);
+            
+                #determine cut position and distance to primary sgRNA cut
+                my $rc_tempsg = reverse_complement($tempsg);
+                $seq1 =~ /CC.$rc_tempsg/;
+                my $tempCutPos = $-[0]+6;
+                ####TEST LINE###
+                my $tempDistance = $tempCutPos-$chosenCutPos+1;
+                if ((abs($tempDistance)>=20) && (abs($tempDistance) <= 100) ){
+                    $nicksghash{$tempsg} = [$tempsg,$tempCutPos,"antisense",$tempDistance];
+                }
             }
         }
     }
 
     if (scalar keys %nicksghash > 0){
         #choose the nicking sgRNA that is closest to 50bp from the primary nick
-            my $ctt = 0;
-            foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
-                if ($ctt == 0){
-                    $chosenNickSG = $k;
-                    $chosenNickSGPos = $nicksghash{$k}[1];
-                    $chosenNickOrientation = $nicksghash{$k}[2];
-                    $chosenNickSGDist = $nicksghash{$k}[3];
-                }
-                $ctt++;
+        my $ctt = 0;
+        foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
+            if ($ctt == 0){
+                $chosenNickSG = $k;
+                $chosenNickSGPos = $nicksghash{$k}[1];
+                $chosenNickOrientation = $nicksghash{$k}[2];
+                $chosenNickSGDist = $nicksghash{$k}[3];
             }
+            $ctt++;
+        }
                 
-            return ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,\%nicksghash);
-        }
+        return ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,\%nicksghash);
+    }
         
-        # if no candidate nicking sgRNA found, return value stating none
-        else {
-            return("none found","none");
-        }
+    # if no candidate nicking sgRNA found, return value stating none
+    else {
+        return("none found","none");
     }
 }
 

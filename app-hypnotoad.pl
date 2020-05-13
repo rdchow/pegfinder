@@ -8,7 +8,7 @@ require "./lib/sub-PBS-RT-design.pl";
 
 ###kill hypnotoads with --quit,
 plugin Config => {
- default => {
+  default => {
     hypnotoad => {
       listen => ["http://*:$ENV{PORT}"]
     }
@@ -556,7 +556,7 @@ __DATA__
       %=radio_button 'PE3cb', value => 0
       No<br>
      
-      <br>(Optional) Upload <a href="https://portals.broadinstitute.org/gpp/public/analysis-tools/sgrna-design"> Broad sgRNA finder </a> or <a href="https://www.crisprscan.org/?page=sequence"> CRISPRscan </a>results: &nbsp;&nbsp;&nbsp;  
+      <br>(Recommended) Upload <a href="https://portals.broadinstitute.org/gpp/public/analysis-tools/sgrna-design"> Broad sgRNA finder </a> or <a href="https://www.crisprscan.org/?page=sequence"> CRISPRscan </a>results: &nbsp;&nbsp;&nbsp;  
       %= file_field 'sgRNA', id => 'sgRNAControl', value => ''
       <button id = "clear" type="button"> Clear </button>
       <br>Use the wildtype sequence as input and report all possible sgRNAs. <br> <br>
@@ -574,6 +574,7 @@ __DATA__
 
   <footer>
     <p> &copy 2019, Laboratory of Sidi Chen</p>
+    <br> See our manuscript describing pegFinder: <a href="https://www.biorxiv.org/content/10.1101/2020.05.06.081612v1">bioRxiv </a>
   </footer>
   
 </html>
