@@ -399,7 +399,7 @@ post '/upload' => sub {
     $oligotable .= '<tr><td>scaffF</td><td>GCTAGAAATAGCAAGTTAAAATAAGGCTAGTCCGTTATCAACTTGAAAAAGTGGCACCGAGTCG</td><td>Scaffold, forward (invariant)</td></tr>';
     $oligotable .= '<tr><td>scaffR</td><td>GCACCGACTCGGTGCCACTTTTTCAAGTTGATAACGGACTAGCCTTATTTTAACTTGCTATTTC</td><td>Scaffold, reverse (invariant)</td></tr>';
     $oligotable .= '<tr><td>extensF</td><td>gtgc'.$extension.'</td><td>3\' extension, forward</td></tr>';
-    $oligotable .= '<tr><td>extensR</td><td>aaaaa'.reverse_complement($extension).'</td><td>3\' extension, reverse</td></tr>';
+    $oligotable .= '<tr><td>extensR</td><td>aaaa'.reverse_complement($extension).'</td><td>3\' extension, reverse</td></tr>';
 
     #if a PE3 nicking sgRNA was chosen:
     if ($pe3Bool == 1 && defined $chosenNickSG){
