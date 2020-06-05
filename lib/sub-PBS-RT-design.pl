@@ -33,7 +33,7 @@ sub find_pbs {
         $chosenPBSlen = 0;
     }
     if ($chosenPBSlen > 17){
-        $chosenPBSlen = 17);
+        $chosenPBSlen = 17;
     }
 
     my $chosenPBS = $pbshash{$chosenPBSlen};
