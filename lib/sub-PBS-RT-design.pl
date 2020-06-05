@@ -4,7 +4,6 @@
 ##############################################################################
 ### Using the chosen sgRNA, find an appropriate primer binding site (PBS)
 
-# PBS recommendation: 13 nt, with 40-60% GC content
 # Will report all PBS from 8-17 nt length for downstream optimization
 # PBS is complementary to the DNA upstream of the cut site
 # 5' end of PBS is close to sgRNA cut site, while 3' end of PBS is farther from cut site
@@ -26,19 +25,17 @@ sub find_pbs {
     }
 
     #Pick a PBS based on GC percentage of the sgRNA, for the sake of having a default option
-    #if GC 30-70%, use PBS of 13nt
-    my $chosenPBSlen;
-    if ($gcPctg >= 30 && $gcPctg <= 70){
-        $chosenPBSlen = 13;
+    
+    my $chosenPBSlen = 13 - (($gcPctg-55)/5);
+    $chosenPBSlen = int($chosenPBSlen+0.5);
+
+    if ($chosenPBSlen < 8){
+        $chosenPBSlen = 0;
     }
-    #if GC <30%, use PBS of 14nt
-    elsif ($gcPctg < 30){
-        $chosenPBSlen = 14;
+    if ($chosenPBSlen > 17){
+        $chosenPBSlen = 17);
     }
-    #if GC >70%, use PBS of 12nt
-    elsif ($gcPctg > 70){
-        $chosenPBSlen = 12;
-    }
+
     my $chosenPBS = $pbshash{$chosenPBSlen};
     $pbstable .= "</table>";
     print "\nChose $chosenPBS of length $chosenPBSlen as the PBS.\n\n";
@@ -59,7 +56,7 @@ sub find_RT {
     }
     elsif ($chosenOrientation eq "antisense"){
         $minimalEditLen = $chosenCutPos-$minEditPos+1+$wtdelcounter;
-        #$minimalEditLen = $chosenCutPos-$minEditPos+1-$wtdelcounter; #distance from sgRNA cut to farthest edited base. 
+        #distance from sgRNA cut to farthest edited base. 
     }
     print "minimal edit length: $minimalEditLen\n";
 
@@ -71,7 +68,6 @@ sub find_RT {
         }
     }
     my $minimalRTLen = $minimalEditLen - $delCounter; #holds the minimal sequence length needed on the RT template to generate the edits
-    #print "$minimalRTLen\n";
 
     #If the chosen sgRNA is on the sense strand:
     my %rthash; # hash that stores the candidate RT templates
@@ -86,7 +82,7 @@ sub find_RT {
         if ($minimalEditLen < 10){
             print "The edit distance is < 10 nt ($minimalEditLen nt), with $delCounter deletion base(s). Extracting all 10-16nt RT templates:\n";
             print "Length\tSenseSequence\tTemplate_Seq\tWarnings\n";
-            for (my $i = 10; $i <= 16; $i++){
+            for (my $i = 10; $i <= 17; $i++){
                 my $align2Copy = $align2;
                 $align2Copy =~ s/-//g;
                 my $templateSeq = substr($align2Copy,$chosenCutPos-1,$i); # holds the sequence of the cDNA that will synthesized by the RT
@@ -119,7 +115,7 @@ sub find_RT {
             }  
         }
         else {
-            print "The edit distance is >= 10 nt ($minimalEditLen nt), with $delCounter deletion base(s). Returning all ", ($minimalRTLen+1) , "-", ($minimalRTLen+7), "nt RT templates:\n";
+            print "The edit distance is >= 10 nt ($minimalEditLen nt), with $delCounter deletion base(s). Returning all ", ($minimalRTLen+1) , "-", ($minimalRTLen+8), "nt RT templates:\n";
             print "Length\tSenseSequence\tTemplateSequence\tWarnings\n";
             for (my $i = $minimalRTLen+1; $i < $minimalRTLen+7; $i++){
                 my $align2Copy = $align2;

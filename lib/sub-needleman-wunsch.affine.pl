@@ -6,9 +6,6 @@ use strict;
 use warnings;
 use Algorithm::NeedlemanWunsch;
 
-#my ($seq1a,$seq2a) = @ARGV;
-#my @values = needleman_wunsch($seq1a,$seq2a);
-
 sub needleman_wunsch {
     my ($seq1, $seq2) = @_;
     my $arr1 = [split ("",$seq1)];
@@ -57,7 +54,7 @@ sub needleman_wunsch {
         $trimmingStatus3p = 2;
     }
     my $wtdelcounter = 0; # counts how many gaps are in the wildtype alignment; need for calculating the edit distance
-    
+    my $mutdelcounter = 0;
     my %alterhash; #Stores the alterations to generate sequence 2; 1-based coordinates
     for (my $i = 0; $i < length $align1; $i++){     
         if ($chars1[$i] ne $chars2[$i]){
@@ -66,6 +63,9 @@ sub needleman_wunsch {
         }
         if ($chars1[$i] eq "-"){
             $wtdelcounter++;
+        }
+        if ($chars2[$i] eq "-"){
+            $mutdelcounter++;
         }
     }
 
@@ -91,7 +91,7 @@ sub needleman_wunsch {
             }
         }
     }
-    return($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p,$wtdelcounter);
+    return($align1,$align2,$minEditPos,$maxEditPos,$trimmingStatus5p,$trimmingStatus3p,$wtdelcounter,\%alterhash,$mutdelcounter);
 
 
     #create a score matrix

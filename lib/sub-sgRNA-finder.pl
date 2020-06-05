@@ -3,12 +3,17 @@ use strict;
 use warnings;
 
 #$|=2;
+
+
 sub process_broad_sgRNA { #process the Broad sgRNA file
-    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter) = @_;
+    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq1,$seq2) = @_;
+
     $data_text =~ s/"//g;
     my @rows = split (/[\r\n]+/,$data_text);
     my $head = $rows[0];
     my @headers = split ("\t",$head);
+    my @chars1 = split ("",$seq1);
+    my @chars2 = split ("",$seq2);
 
     #save the column index of relevant columns
     my $cutPosCol;
@@ -57,20 +62,23 @@ sub process_broad_sgRNA { #process the Broad sgRNA file
         my $offTargetT2 = $lines[$offTargetT2Col];
         my $offTargetT3 = $lines[$offTargetT3Col];
 
+        my $revsg = reverse_complement($sgRNA);
         #Sense strand sgRNAs:
-        if ($orientation eq "sense"){
+        if ($orientation eq "sense" && $seq1 =~ /$sgRNA.GG/){
             print "$cutPos\t$minEditPos\t$maxEditPos\n";
-            if ($minEditPos >= $cutPos && $maxEditPos <= ($cutPos+$maxEditDistance) && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1)){
+            if ($minEditPos >= $cutPos && $maxEditPos <= ($cutPos+$maxEditDistance) && (($offTargetT1 + $offTargetT2) <= 1) && $sgRNA !~ /TTTTT/){
                 my $distance = $minEditPos-$cutPos;
+
                 $sghash{$sgRNA} = [$onTargetScore,$cutPos,$orientation,$distance];
             }
         }
         #Antisense strand sgRNAs:
-        elsif ($orientation eq "antisense"){
+        elsif ($orientation eq "antisense" && $seq1 =~ /CC.$revsg/){
             $cutPos--;
             print "$cutPos\t$minEditPos\t$maxEditPos\n";
-            if ($minEditPos >= ($cutPos-$maxEditDistance) && $maxEditPos <= ($cutPos+$wtdelcounter) && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1)){
-                my $distance = ($cutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases 
+            if ($minEditPos >= ($cutPos-$maxEditDistance) && $maxEditPos <= ($cutPos+$wtdelcounter) && (($offTargetT1 + $offTargetT2) <= 1) && $sgRNA !~ /TTTTT/){
+                my $distance = ($cutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases
+
                 $sghash{$sgRNA} = [$onTargetScore,$cutPos,$orientation,$distance];
             }
         }
@@ -79,72 +87,72 @@ sub process_broad_sgRNA { #process the Broad sgRNA file
         print "Found ".scalar(keys %sghash)." candidate sgRNAs that are within $maxEditDistance nt of the edit start.\n";
         # Rank/filter the sgRNAs
         # Strategy of picking:
-        # 1) Among sgRNAs with OnTarget >= 0.5, choose sgRNA with shortest distance to edit start. If tied for shortest distance, pick sgRNA with highest OT score
-        # 2) If no sgRNAs with OnTarget >= 0.5, choose sgRNA with highest OnTarget score regardless of distance
-        my $chosenSG;
-
-        my $OTcheck = 0;
+        #sort for OT >= 0.5 (binary), then disruptive edit, then lower distance to edit
+  
         foreach my $k (keys %sghash){
+            
+            #check if the sgRNA will be disrupted
+            my $disrupt = 0;
+            my $orientation = $sghash{$k}[2];
+            my $sgRNA = $k;
+            if ($orientation eq "sense"){
+                if ($seq2 !~ /$sgRNA.GG/){ #if the sgRNA is disrupted in the edited sequence:
+                    $disrupt = 1;
+                }
+            }
+            elsif ($orientation eq "antisense"){
+                my $rc_c_sg = reverse_complement($sgRNA);
+                if ($seq2 !~ /CC.$rc_c_sg/){ #if the sgRNA is disrupted in the edited sequence:
+                    $disrupt = 1;
+                }
+            }
+            $sghash{$k}[4] = $disrupt;
+
+            #binary value of OT >= 0.5
             if ($sghash{$k}[0] >= 0.5){
-                $OTcheck = 1;
+                $sghash{$k}[5] = 1;
+            }
+            else {
+                $sghash{$k}[5] = 0;
             }
         }
-        # If there is an sgRNA with OnTarget >= 0.5
-        if ($OTcheck == 1){
-            my $currentMaxOT = 0;
-            my $currentMinDist = 999999999999999;
+        
+        my $chosenSG;
+        my $chosenCutPos;
+        my $chosenOrientation;
+        my $chosenDistance;
+        my $gcPctg;
 
-            foreach my $k (keys %sghash){
-                if ($sghash{$k}[0] >= 0.5){ # considering the sgRNAs with OnTarget >= 0.5
-                    if ($sghash{$k}[3] < $currentMinDist){ # if shorter distance than previous best sgRNA
-                        $chosenSG = $k;
-                        $currentMinDist = $sghash{$k}[3];
-                        $currentMaxOT = $sghash{$k}[0];
-                    }
-                    elsif ($sghash{$k}[3] == $currentMinDist){ # if same distance as previous best sgRNA
-                        if ($sghash{$k}[0] > $currentMaxOT){ # if current sgRNA has higher OT score
-                            $chosenSG = $k;
-                            $currentMinDist = $sghash{$k}[3];
-                            $currentMaxOT = $sghash{$k}[0];
-                        }
-                    }
+        #generate a top ranked sgRNA hash
+        my $counter = 0;
+        my %ranksghash;
+
+        #sort for OT >= 0.5 (binary), then disruptive edit, then lower distance to edit, then OT score
+        foreach my $k (sort {$sghash{$b}[5] <=> $sghash{$a}[5] || $sghash{$b}[4] <=> $sghash{$a}[4] || $sghash{$a}[3] <=> $sghash{$b}[3] || $sghash{$b}[0] <=> $sghash{$a}[0] } keys %sghash){
+            #calculate GC content of each sgRNA
+            my @sgbases = split ("", $k);
+            my $gcCounter = 0;
+            for (my $i = 0; $i < scalar @sgbases; $i++){
+                if ($sgbases[$i] eq "G" || $sgbases[$i] eq "C"){
+                    $gcCounter++;
                 }
             }
-        }
+            my $gcPctg2 = $gcCounter / scalar (@sgbases) * 100;
 
-        # If no sgRNA with OnTarget >= 0.5
-        elsif ($OTcheck == 0){
-            my $currentMaxOT = 0;
+            # sgRNA seq, OT score, cut position, orientation, distance, disrupt, GC %                 
+            $ranksghash{$counter} = [$k,$sghash{$k}[0],$sghash{$k}[1], $sghash{$k}[2],$sghash{$k}[3],$sghash{$k}[4],$gcPctg2];                
 
-            foreach my $k (keys %sghash){
-                if ($sghash{$k}[0] > $currentMaxOT){ # if current sgRNA has higher OT score
-                    $chosenSG = $k;
-                    $currentMaxOT = $sghash{$k}[0];
-                }
+            if ($counter == 0){ #first ranked sgRNA
+                $chosenSG = $k;
+                $chosenCutPos = $sghash{$chosenSG}[1];
+                $chosenOrientation = $sghash{$chosenSG}[2];
+                $chosenDistance = $sghash{$chosenSG}[3];
+                $gcPctg = $gcPctg2;
             }
+            $counter++;
         }
 
-        #calculate GC content of the chosen sgRNA
-        my @sgbases = split ("",$chosenSG);
-        my $gcCounter = 0;
-        for (my $i = 0; $i < scalar @sgbases; $i++){
-            if ($sgbases[$i] eq "G" || $sgbases[$i] eq "C"){
-                $gcCounter++;
-            }
-        }
-        my $gcPctg = $gcCounter / scalar (@sgbases) * 100;
-
-        print "Chose $chosenSG as the best sgRNA.\n";
-        print "On Target Score: $sghash{$chosenSG}[0]\n";
-        print "Cut Position: $sghash{$chosenSG}[1]\n";
-        print "Orientation: $sghash{$chosenSG}[2]\n";
-        print "Distance To Edit Start: $sghash{$chosenSG}[3]\n";
-        print "G/C content: $gcPctg%\n\n";
-
-        my $chosenCutPos = $sghash{$chosenSG}[1];
-        my $chosenOrientation = $sghash{$chosenSG}[2];
-        my $chosenDistance = $sghash{$chosenSG}[3];   
-        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg);
+        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,\%ranksghash);
     }
     
     # if no candidate sgRNA found, return value stating none
@@ -155,7 +163,7 @@ sub process_broad_sgRNA { #process the Broad sgRNA file
 }
 
 sub process_crisprscan_sgRNA {
-    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq1) = @_;
+    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq1,$seq2) = @_;
     $data_text =~ s/"//g;
     my @rows = split (/[\r\n]+/,$data_text);
     my $head = $rows[0];
@@ -204,7 +212,7 @@ sub process_crisprscan_sgRNA {
             $cutPos = $-[0]+18;
             print "$sgRNA \t$cutPos\n";
             $distance = $minEditPos-$cutPos;
-            if ($minEditPos >= $cutPos && $maxEditPos <= ($cutPos+$maxEditDistance) && $offTarget == 0){
+            if ($minEditPos >= $cutPos && $maxEditPos <= ($cutPos+$maxEditDistance) && $offTarget == 0 && $sgRNA !~ /TTTTT/){
                 $sghash{$sgRNA} = [$onTargetScore,$cutPos,$orientation,$distance];
             }
         }
@@ -213,7 +221,7 @@ sub process_crisprscan_sgRNA {
             $seq1 =~ /CC.$rc_c_sg/;
             $cutPos = $-[0]+6;
             $distance = ($cutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases
-            if ($minEditPos >= ($cutPos-$maxEditDistance) && $maxEditPos <= ($cutPos+$wtdelcounter) && $offTarget == 0){
+            if ($minEditPos >= ($cutPos-$maxEditDistance) && $maxEditPos <= ($cutPos+$wtdelcounter) && $offTarget == 0 && $sgRNA !~ /TTTTT/){
                 $sghash{$sgRNA} = [$onTargetScore,$cutPos,$orientation,$distance];
             }
         }
@@ -222,72 +230,73 @@ sub process_crisprscan_sgRNA {
         print "Found ".scalar(keys %sghash)." candidate sgRNAs that are within $maxEditDistance nt of the edit start.\n";
         # Rank/filter the sgRNAs
         # Strategy of picking:
-        # 1) Among sgRNAs with OnTarget >= 25, choose sgRNA with shortest distance to edit start. If tied for shortest distance, pick sgRNA with highest OT score
-        # 2) If no sgRNAs with OnTarget >= 25, choose sgRNA with highest OnTarget score regardless of distance
-        my $chosenSG;
+        #sort for OT >=25 (binary), then disruptive edit, then lower distance to edit
+        
 
-        my $OTcheck = 0;
         foreach my $k (keys %sghash){
+            
+            #check if the sgRNA will be disrupted
+            my $disrupt = 0;
+            my $orientation = $sghash{$k}[2];
+            my $sgRNA = $k;
+            if ($orientation eq "sense"){
+                if ($seq2 !~ /$sgRNA.GG/){ #if the sgRNA is disrupted in the edited sequence:
+                    $disrupt = 1;
+                }
+            }
+            elsif ($orientation eq "antisense"){
+                my $rc_c_sg = reverse_complement($sgRNA);
+                if ($seq2 !~ /CC.$rc_c_sg/){ #if the sgRNA is disrupted in the edited sequence:
+                    $disrupt = 1;
+                }
+            }
+            $sghash{$k}[4] = $disrupt;
+
+            #binary value of OT >=25
             if ($sghash{$k}[0] >= 25){
-                $OTcheck = 1;
+                $sghash{$k}[5] = 1;
+            }
+            else {
+                $sghash{$k}[5] = 0;
             }
         }
-        # If there is an sgRNA with OnTarget >= 25
-        if ($OTcheck == 1){
-            my $currentMaxOT = 0;
-            my $currentMinDist = 999999999999999;
+        
+        my $chosenSG;
+        my $chosenCutPos;
+        my $chosenOrientation;
+        my $chosenDistance;
+        my $gcPctg;
 
-            foreach my $k (keys %sghash){
-                if ($sghash{$k}[0] >= 25){ # considering the sgRNAs with OnTarget >= 25
-                    if ($sghash{$k}[3] < $currentMinDist){ # if shorter distance than previous best sgRNA
-                        $chosenSG = $k;
-                        $currentMinDist = $sghash{$k}[3];
-                        $currentMaxOT = $sghash{$k}[0];
-                    }
-                    elsif ($sghash{$k}[3] == $currentMinDist){ # if same distance as previous best sgRNA
-                        if ($sghash{$k}[0] > $currentMaxOT){ # if current sgRNA has higher OT score
-                            $chosenSG = $k;
-                            $currentMinDist = $sghash{$k}[3];
-                            $currentMaxOT = $sghash{$k}[0];
-                        }
-                    }
+        #generate a top ranked sgRNA hash
+        my $counter = 0;
+        my %ranksghash;
+
+        #sort for OT >=25 (binary), then disruptive edit, then lower distance to edit, then OT score
+        foreach my $k (sort {$sghash{$b}[5] <=> $sghash{$a}[5] || $sghash{$b}[4] <=> $sghash{$a}[4] || $sghash{$a}[3] <=> $sghash{$b}[3] || $sghash{$b}[0] <=> $sghash{$a}[0]  } keys %sghash){
+            #calculate GC content of each sgRNA
+            my @sgbases = split ("", $k);
+            my $gcCounter = 0;
+            for (my $i = 0; $i < scalar @sgbases; $i++){
+                if ($sgbases[$i] eq "G" || $sgbases[$i] eq "C"){
+                    $gcCounter++;
                 }
             }
-        }
+            my $gcPctg2 = $gcCounter / scalar (@sgbases) * 100;
 
-        # If no sgRNA with OnTarget >= 0.5
-        elsif ($OTcheck == 0){
-            my $currentMaxOT = 0;
+            # sgRNA seq, OT score, cut position, orientation, distance,disrupt, GC %                 
+            $ranksghash{$counter} = [$k,$sghash{$k}[0],$sghash{$k}[1], $sghash{$k}[2],$sghash{$k}[3],$sghash{$k}[4],$gcPctg2]; 
 
-            foreach my $k (keys %sghash){
-                if ($sghash{$k}[0] > $currentMaxOT){ # if current sgRNA has higher OT score
-                    $chosenSG = $k;
-                    $currentMaxOT = $sghash{$k}[0];
-                }
+            if ($counter == 0){ #first ranked sgRNA
+                $chosenSG = $k;
+                $chosenCutPos = $sghash{$chosenSG}[1];
+                $chosenOrientation = $sghash{$chosenSG}[2];
+                $chosenDistance = $sghash{$chosenSG}[3];
+                $gcPctg = $gcPctg2;
             }
+            $counter++;
         }
 
-        #calculate GC content of the chosen sgRNA
-        my @sgbases = split ("",$chosenSG);
-        my $gcCounter = 0;
-        for (my $i = 0; $i < scalar @sgbases; $i++){
-            if ($sgbases[$i] eq "G" || $sgbases[$i] eq "C"){
-                $gcCounter++;
-            }
-        }
-        my $gcPctg = $gcCounter / scalar (@sgbases) * 100;
-
-        print "Chose $chosenSG as the best sgRNA.\n";
-        print "On Target Score: $sghash{$chosenSG}[0]\n";
-        print "Cut Position: $sghash{$chosenSG}[1]\n";
-        print "Orientation: $sghash{$chosenSG}[2]\n";
-        print "Distance To Edit Start: $sghash{$chosenSG}[3]\n";
-        print "G/C content: $gcPctg%\n\n";
-
-        my $chosenCutPos = $sghash{$chosenSG}[1];
-        my $chosenOrientation = $sghash{$chosenSG}[2];
-        my $chosenDistance = $sghash{$chosenSG}[3];   
-        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg);
+        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,\%ranksghash);
     }
     
     # if no candidate sgRNA found, return value stating none
@@ -298,7 +307,7 @@ sub process_crisprscan_sgRNA {
 }
 
 sub find_broad_nicksgRNA {
-    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation) = @_;
+    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist) = @_;
     $data_text =~ s/"//g;
     my @rows = split (/[\r\n]+/,$data_text);
 
@@ -368,17 +377,17 @@ sub find_broad_nicksgRNA {
             my $offTargetT2 = $allsghash{$k}[4];
             my $offTargetT3 = $allsghash{$k}[5];
 
-            #only consider nicking sgRNA if on the opposite strand and 20-100 nt away from the chosen cut site
+            #only consider nicking sgRNA if on the opposite strand and 40-100 nt away from the chosen cut site
             if ($chosenOrientation eq "sense"){
                 $cutPos--;
                 my $dist = $cutPos-$chosenCutPos+1;
-                if ($orientation eq "antisense" && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1) && (abs($dist)>=20) && (abs($dist) <= 100) ){
+                if ($orientation eq "antisense" && (($offTargetT1 + $offTargetT2) <= 1) && (abs($dist)>=$minNickDist) && (abs($dist) <= $maxNickDist) && $k !~ /TTTTT/){
                     $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$dist];
                 }
             }
             elsif ($chosenOrientation eq "antisense"){
                 my $dist = $cutPos-$chosenCutPos-1;
-                if ($orientation eq "sense" && (($offTargetT1 + $offTargetT2 + $offTargetT3) <= 1) && (abs($dist)>=20) && (abs($dist) <= 100) ){
+                if ($orientation eq "sense" && (($offTargetT1 + $offTargetT2) <= 1) && (abs($dist)>=$minNickDist) && (abs($dist) <= $maxNickDist) && $k !~ /TTTTT/){
                     $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$dist];
                 }
             }
@@ -407,7 +416,7 @@ sub find_broad_nicksgRNA {
 }
 
 sub find_crisprscan_nicksgRNA {
-    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq1) = @_;
+    my ($data_text,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq1,$minNickDist,$maxNickDist) = @_;
     $data_text =~ s/"//g;
     my @rows = split (/[\r\n]+/,$data_text);
 
@@ -474,17 +483,17 @@ sub find_crisprscan_nicksgRNA {
             my $orientation = $allsghash{$k}[2];
             my $offTarget = $allsghash{$k}[3];
 
-            #only consider nicking sgRNA if on the opposite strand and 20-100 nt away from the chosen cut site
+            #only consider nicking sgRNA if on the opposite strand and 40-100 nt away from the chosen cut site
             if ($chosenOrientation eq "sense"){
                 $cutPos--;
                 my $dist = $cutPos-$chosenCutPos+1;
-                if ($orientation eq "antisense" && $offTarget == 0 && (abs($dist)>=20) && (abs($dist) <= 100) ){
+                if ($orientation eq "antisense" && $offTarget == 0 && (abs($dist)>=$minNickDist) && (abs($dist) <= $maxNickDist) && $k !~ /TTTTT/){
                     $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$dist];
                 }
             }
             elsif ($chosenOrientation eq "antisense"){
                 my $dist = $cutPos-$chosenCutPos-1;
-                if ($orientation eq "sense" && $offTarget == 0 && (abs($dist)>=20) && (abs($dist) <= 100) ){
+                if ($orientation eq "sense" && $offTarget == 0 && (abs($dist)>=$minNickDist) && (abs($dist) <= $maxNickDist) && $k !~ /TTTTT/){
                     $nicksghash{$k} = [$onTargetScore,$cutPos,$orientation,$dist];
                 }
             }
@@ -515,7 +524,7 @@ sub find_crisprscan_nicksgRNA {
 #If an sgRNA was preselected, calculate the needed metrics (Cut position, orientation, distance to edit, GC %)
 #take the chosen sgRNA sequence, the wildtype DNA sequence, minEditPos, maxEditPos, and maxEditDistance 
 sub process_chosen_sgRNA {
-    my ($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter) = @_;
+    my ($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2) = @_;
     my $chosenOrientation;
     my $chosenSG = $c_sg;
     my $chosenCutPos;
@@ -563,6 +572,26 @@ sub process_chosen_sgRNA {
             $chosenDistance = ($chosenCutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases
         }
 
+        #test if chosen sgRNA will disrupt the PAM/seed
+        my $chosenDisrupt;
+        if ($chosenOrientation eq "sense"){
+            if ($seq2 !~ /$c_sg.GG/){ #if the sgRNA is disrupted in the edited sequence:
+                $chosenDisrupt = 1;
+            }
+            else {
+                $chosenDisrupt = 0;
+            }
+        }
+        elsif ($chosenOrientation eq "antisense"){
+            my $rc_c_sg = reverse_complement($c_sg);
+            if ($seq2 !~ /CC.$rc_c_sg/){ #if the sgRNA is disrupted in the edited sequence:
+                $chosenDisrupt = 1;
+            }
+            else {
+                $chosenDisrupt = 0;
+            }
+        }
+
         print "Using $chosenSG as the preselected sgRNA.\n";
         print "Cut Position: $chosenCutPos\n";
         print "Orientation: $chosenOrientation\n";
@@ -578,12 +607,12 @@ sub process_chosen_sgRNA {
         elsif ($chosenDistance <0){
             $sgfoundStatus = 0;
         }
-        return ($chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,$sgfoundStatus);
+        return ($chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,$sgfoundStatus,$chosenDisrupt);
     }
 }
 
 sub find_choose_sgRNA {
-    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance, $wtdelcounter) = @_;
+    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance, $wtdelcounter,$seq2) = @_;
     my $chosenOrientation;
     my $chosenSG;
     my $chosenCutPos;
@@ -595,7 +624,7 @@ sub find_choose_sgRNA {
     my @chars = split ("",$seq1);
 
     #first check sense orientation:
-    for (my $i = 21; $i < scalar @chars; $i++){
+    for (my $i = 21; $i < scalar @chars-1; $i++){
         my $tempsg;
         if ($chars[$i] eq "G" && $chars[$i+1] eq "G"){
             for (my $k = $i-21; $k <= $i-2; $k++){
@@ -617,7 +646,7 @@ sub find_choose_sgRNA {
             my $tempCutPos = $-[0]+18;
             my $tempDistance = $minEditPos-$tempCutPos;
 
-            if ($minEditPos >= $tempCutPos && $maxEditPos <= ($tempCutPos+$maxEditDistance)){
+            if ($minEditPos >= $tempCutPos && $maxEditPos <= ($tempCutPos+$maxEditDistance) && $tempsg !~ /TTTTT/){
                 $sghash{$tempsg} = [$tempsg, "sense", $tempgcPctg,$tempCutPos,$tempDistance];
             }
         }
@@ -646,27 +675,62 @@ sub find_choose_sgRNA {
             $seq1 =~ /CC.$rc_tempsg/;
             my $tempCutPos = $-[0]+6;
             my $tempDistance = ($tempCutPos-$maxEditPos)+$wtdelcounter; # gaps in the wildtype alignment will push the max edit position closer to the cut site; need to add back in those bases
-            if ($minEditPos >= ($tempCutPos-$maxEditDistance) && $maxEditPos <= ($tempCutPos+$wtdelcounter)){
+            if ($minEditPos >= ($tempCutPos-$maxEditDistance) && $maxEditPos <= ($tempCutPos+$wtdelcounter) && $tempsg !~ /TTTTT/){
                 $sghash{$tempsg} = [$tempsg, "antisense", $tempgcPctg,$tempCutPos,$tempDistance];
             }
         }
     }
 
     # %sghash holds all identified sgRNAs that are candidates for the desired edit.
-    # choose a single sgRNA that is closest to the edit site
-    my $sgfoundStatus = 0;
+    # choose a single sgRNA that disrupts the sgRNA, or if none, the sgRNA closest to the edit site
+ 
     if (scalar keys %sghash > 0){
-        foreach my $k (sort { abs($sghash{$a}[4]) <=> abs($sghash{$b}[4]) } keys %sghash){
-            if ($sgfoundStatus == 0){
+        foreach my $k (keys %sghash){
+
+            #check if the sgRNA is disrupted in edited sequence
+            my $orientation = $sghash{$k}[1];
+            my $sgRNA = $k;
+            if ($orientation eq "sense"){
+                if ($seq2 !~ /$sgRNA.GG/){ #if the sgRNA is disrupted in the edited sequence:
+                    $sghash{$k}[5] = 1;
+                }
+                else {
+                    $sghash{$k}[5] = 0;
+                }
+            }
+            elsif ($orientation eq "antisense"){
+                my $rc_c_sg = reverse_complement($sgRNA);
+                if ($seq2 !~ /CC.$rc_c_sg/){ #if the sgRNA is disrupted in the edited sequence:
+                    $sghash{$k}[5] = 1;
+                }
+                else {
+                    $sghash{$k}[5] = 0;
+                }
+            }
+        }
+        
+        #generate a top ranked sgRNA hash
+        my $counter = 0;
+        my %ranksghash;
+        
+        #sort by disruptive binary, then by distance to edit
+        foreach my $k (sort {$sghash{$b}[5] <=> $sghash{$a}[5] || $sghash{$a}[4] <=> $sghash{$b}[4] } keys %sghash){
+            if ($counter == 0){ # top rank sgRNA
                 $chosenSG = $k;
                 $chosenCutPos = $sghash{$k}[3];
                 $chosenDistance = $sghash{$k}[4];
                 $chosenOrientation = $sghash{$k}[1];
                 $gcPctg = $sghash{$k}[2];
-                $sgfoundStatus++;
             }
+            # sgRNA seq, NA, cut position, orientation, distance, disrupt, GC % 
+            $ranksghash{$counter} = [$k,"NA",$sghash{$k}[3],$sghash{$k}[1],$sghash{$k}[4],$sghash{$k}[5],$sghash{$k}[2]];
+            #$ranksghash{$counter} = 1;
+            print $ranksghash{$counter}[3],"\n";
+            $counter++;
+            
+
         }
-        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg);
+        return (\%sghash,$chosenSG,$chosenCutPos,$chosenOrientation,$chosenDistance,$gcPctg,\%ranksghash);
     }
     # if no candidate sgRNA found, return value stating none
     else {
@@ -678,7 +742,7 @@ sub find_choose_sgRNA {
 
 # if no sgRNA designer file uploaded, design nicking sgRNA
 sub find_choose_nick_sgRNA{
-    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation) = @_;
+    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist) = @_;
     my $chosenNickOrientation;
     my $chosenNickSG;
     my $chosenNickSGPos;
@@ -690,7 +754,7 @@ sub find_choose_nick_sgRNA{
 
     #if chosen sgRNA is antisense, look for sense sgRNAs for PE3:
     if ($chosenOrientation eq "antisense"){
-        for (my $i = 21; $i < scalar @chars; $i++){
+        for (my $i = 21; $i < scalar @chars-1; $i++){
             my $tempsg;
             if ($chars[$i] eq "G" && $chars[$i+1] eq "G"){
                 for (my $k = $i-21; $k <= $i-2; $k++){
@@ -701,7 +765,7 @@ sub find_choose_nick_sgRNA{
                 my $tempCutPos = $-[0]+18;
                 my $tempDistance = $chosenCutPos-$tempCutPos-1;
 
-                if ((abs($tempDistance)>=20) && (abs($tempDistance) <= 100)){
+                if ((abs($tempDistance)>=$minNickDist) && (abs($tempDistance) <= $maxNickDist) && $tempsg !~ /TTTTT/){
                     $nicksghash{$tempsg} = [$tempsg, $tempCutPos,"sense", $tempDistance];
                 }
             }
@@ -725,7 +789,7 @@ sub find_choose_nick_sgRNA{
                 my $tempCutPos = $-[0]+6;
                 ####TEST LINE###
                 my $tempDistance = $tempCutPos-$chosenCutPos+1;
-                if ((abs($tempDistance)>=20) && (abs($tempDistance) <= 100) ){
+                if ((abs($tempDistance)>=$minNickDist) && (abs($tempDistance) <= $maxNickDist) && $tempsg !~ /TTTTT/){
                     $nicksghash{$tempsg} = [$tempsg,$tempCutPos,"antisense",$tempDistance];
                 }
             }
@@ -754,7 +818,99 @@ sub find_choose_nick_sgRNA{
     }
 }
 
+sub find_pe3b_sgRNA{
+    my ($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter) = @_;
+    my $chosenNickOrientation;
+    my $chosenNickSG;
+    my $chosenNickSGPos;
+    my $chosenNickSGDist;
+    my %nicksghash;
 
+    #Find spacers that are present in seq2 but not in seq1 -- only accessible after the edit
+    #Only care about seed region changes (5nt) so just can't match 10N-NGG in seq1
+
+    #find all candidate spacers in the edited sequence
+    my @chars = split ("",$seq2);
+    my %sghash;
+
+    #if chosen sgRNA is antisense, look for sense sgRNAs for PE3:
+    if ($chosenOrientation eq "antisense"){
+        for (my $i = 21; $i < scalar @chars-1; $i++){
+            my $tempsg;
+            my $seedsg;
+            if ($chars[$i] eq "G" && $chars[$i+1] eq "G"){
+                for (my $k = $i-21; $k <= $i-2; $k++){
+                    $tempsg .= $chars[$k];
+                }
+                for (my $k = $i-11; $k <= $i-2; $k++){
+                    $seedsg .= $chars[$k];
+                }
+            
+                #check if seed sgRNA is absent in seq1
+                if ($seq1 !~ /$seedsg.GG/ && $tempsg !~ /TTTTT/){
+                    #determine cut position and distance to primary sgRNA cut
+                    $seq2 =~ /$tempsg.GG/;
+                    my $tempCutPos = $-[0]+18;
+                    my $tempDistance = $chosenCutPos-$tempCutPos-$mutdelcounter+1;
+
+                    $nicksghash{$tempsg} = [$tempsg, $tempCutPos,"sense", $tempDistance];
+                }
+            }
+        }
+    }
+
+    #else, if chosen sgRNA is sense, look for antisense sgRNAs for PE3:
+    if ($chosenOrientation eq "sense"){
+    #now check antisense orientation:
+        for (my $i = 0; $i < scalar @chars-22; $i++){
+            my $tempsg;
+            my $seedsg;
+            if ($chars[$i] eq "C" && $chars[$i+1] eq "C"){
+                for (my $k = $i+3; $k <= $i+22; $k++){
+                    $tempsg .= $chars[$k];
+                }
+                for (my $k = $i+3; $k <= $i+12; $k++){
+                    $seedsg .= $chars[$k];
+                }
+                $tempsg = reverse_complement($tempsg);
+
+                #check if seed sgRNA is absent in seq1
+
+                if ($seq1 !~ /CC.$seedsg/ && $tempsg !~ /TTTTT/){
+                    
+                    #determine cut position and distance to primary sgRNA cut
+                    my $rc_tempsg = reverse_complement($tempsg);
+                    $seq2 =~ /CC.$rc_tempsg/;
+                    my $tempCutPos = $-[0]+6;
+                    ####TEST LINE###
+                    my $tempDistance = $tempCutPos-$chosenCutPos+1-$wtdelcounter;
+                    $nicksghash{$tempsg} = [$tempsg,$tempCutPos,"antisense",$tempDistance];
+                }
+            }
+        }
+    }
+
+    if (scalar keys %nicksghash > 0){
+        #choose the nicking sgRNA that is closest to the primary nick
+        my $ctt = 0;
+        foreach my $k (sort {$nicksghash{$a}[3] <=> $nicksghash{$b}[3]} keys %nicksghash){
+            if ($ctt == 0){
+                $chosenNickSG = $k;
+                $chosenNickSGPos = $nicksghash{$k}[1];
+                $chosenNickOrientation = $nicksghash{$k}[2];
+                $chosenNickSGDist = $nicksghash{$k}[3];
+            }
+            $ctt++;
+        }
+                
+        return ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,\%nicksghash);
+    }
+        
+    # if no candidate nicking sgRNA found, return value stating none
+    else {
+        return("none found","none");
+    }
+}
 sub reverse_complement {
         my $dna = shift;
 
@@ -765,5 +921,8 @@ sub reverse_complement {
         $revcomp =~ tr/TCGA/AGCT/;
         return $revcomp;
 }
+
+
+
 
 1;
