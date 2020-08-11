@@ -70,7 +70,7 @@ sub prep_table_multi { #prepare output table with alternative 3' extensions + ol
                 }
                 else {
                     $fileout .= "caccg".$chosenSG."gttttaga\t";
-                    $fileout .= "tagctctaaaac".reverse_complement($chosenSG)."\t";      
+                    $fileout .= "tagctctaaaac".reverse_complement($chosenSG)."c"."\t";      
                 }
                 $fileout .= $chosenOrientation."\t".$ranksghash{$i}[5]."\t".$ranksghash{$i}[6]."\t".$ranksghash{$i}[1]."\t";
                 $fileout .= $rgn."\n";
@@ -126,7 +126,7 @@ sub prep_table_chosen{
             }
             else {
                 $fileout .= "caccg".$chosenSG."gttttaga\t";
-                $fileout .= "tagctctaaaac".reverse_complement($chosenSG)."\t";      
+                $fileout .= "tagctctaaaac".reverse_complement($chosenSG)."c"."\t";      
             }
             $fileout .= $chosenOrientation."\t".$chosenDisrupt."\t".$gcPctg."\t";
             $fileout .= $rgn."\n";
