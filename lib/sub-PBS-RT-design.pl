@@ -30,7 +30,7 @@ sub find_pbs {
     $chosenPBSlen = int($chosenPBSlen+0.5);
 
     if ($chosenPBSlen < 8){
-        $chosenPBSlen = 0;
+        $chosenPBSlen = 8;
     }
     if ($chosenPBSlen > 17){
         $chosenPBSlen = 17;
