@@ -4,8 +4,7 @@ use File::Temp qw/ tempfile tempdir /;
 #plugin AutoReload => {};
 plugin 'RenderFile';
 require "./lib/sub-needleman-wunsch.affine.pl";
-require "./lib/sub-sgRNA-finder.pl";
-require "./lib/sub-sgRNA-finder.variants.pl";
+require "./lib/sub-sgRNA-finder.general.pl";
 require "./lib/sub-sgRNA-validator.pl";
 require "./lib/sub-PBS-RT-design.pl";
 require "./lib/prepare-output-table.pl";
@@ -46,6 +45,9 @@ post '/upload' => sub {
   #check if wt and edit are the same
   if ($wt eq $edit){ return $c->render(text=>'Wildtype and edited sequence are identical. Please reenter the form.', status=>200);}
 
+  #check length of inputs to limit computational costs
+  if (length($wt) > 500 || length($edit) > 500){ return $c->render(text=>'Input wildtype or edited sequence is >500 bp. Please reduce the length of the flanking arms around the edit site (recommend 100 bp).', status=>200);}
+  
   #Needleman-Wunsch alignment of the two sequences
   my $seq1 = uc($wt);
   my $seq2 = uc($edit);
@@ -112,21 +114,13 @@ post '/upload' => sub {
   my $sgtable = '<table style ="width:60%">';
   my $nicksgtable = '<table style ="width:75%">';
 
-  return $c->render(text => 'Input is too big. Try reducing sequence length.', status => 200)
+  return $c->render(text => 'Input sequence is too big (>1 kb). Please reduce sequence length.', status => 200)
     if $c->req->is_limit_exceeded; # Check input size
 
   ###### Case 1: User does not submit sgRNA file, nor a chosen sgRNA ##########
   if ( $c_sg eq "" && $sgfile->asset->slurp eq ""){
     my @sgdata;
-    if ($rgn eq "Cas9-NGG"){
-      @sgdata = find_choose_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
-    }
-    elsif ($rgn eq "Cas9-NG"){
-      @sgdata = find_NG_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
-    }
-    elsif ($rgn eq "Cas9-SpRY"){
-      @sgdata = find_SpRY_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
-    }
+    @sgdata = find_choose_sgRNA_general($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2,$rgn);
 
     #if no sgRNAs were found, report back
     return $c->render(text => 'No candidate sgRNAs found.', status => 200)
@@ -154,25 +148,11 @@ post '/upload' => sub {
     if ($pe3Bool > 0){ # check mark for finding PE3 secondary guides
       my @nickdata;
       my @pe3bnickdata;
-      if ($rgn eq "Cas9-NGG"){
-        @nickdata = find_choose_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
-        ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
-        @pe3bnickdata = find_pe3b_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter);
-        ($chosenNickSG3b,$chosenNickSGPos3b,$chosenNickOrientation3b,$chosenNickSGDist3b,$nicksghashpt3b) = @pe3bnickdata;
-      }
-      elsif ($rgn eq "Cas9-NG"){
-        @nickdata = find_NG_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
-        ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
-        @pe3bnickdata = find_NG_pe3b_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter);
-        ($chosenNickSG3b,$chosenNickSGPos3b,$chosenNickOrientation3b,$chosenNickSGDist3b,$nicksghashpt3b) = @pe3bnickdata;
-      }
-      elsif ($rgn eq "Cas9-SpRY"){
-        @nickdata = find_SpRY_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
-        ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
-        @pe3bnickdata = find_SpRY_pe3b_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter);
-        ($chosenNickSG3b,$chosenNickSGPos3b,$chosenNickOrientation3b,$chosenNickSGDist3b,$nicksghashpt3b) = @pe3bnickdata;
-      }
-
+      @nickdata = find_choose_nick_sgRNA_general($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist,$rgn);
+      ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
+      @pe3bnickdata = find_pe3b_sgRNA_general($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter,$rgn);
+      ($chosenNickSG3b,$chosenNickSGPos3b,$chosenNickOrientation3b,$chosenNickSGDist3b,$nicksghashpt3b) = @pe3bnickdata;
+     
       if ($chosenNickSG3b ne "none found"){ # if a PE3b sgRNA was found
         %nicksghash3b = %$nicksghashpt3b;
 
@@ -249,16 +229,8 @@ post '/upload' => sub {
 
     #if sgRNA is present in wildtype sequence:
     my @sgdata;
-    if ($rgn eq "Cas9-NGG"){
-      @sgdata = process_chosen_sgRNA($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
-    }
-    elsif ($rgn eq "Cas9-NG"){
-      @sgdata = process_chosen_NG_sgRNA($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
-    }
-    elsif ($rgn eq "Cas9-SpRY"){
-      @sgdata = process_chosen_SpRY_sgRNA($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
-    }
-    
+    @sgdata = process_chosen_sgRNA_general($c_sg,$seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2,$rgn);
+       
     #if the chosen sgRNA matches to multiple positions, report back
     return $c->render(text => 'Preselected sgRNA matches to multiple positions in wildtype sequence. Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.', status => 200)
       unless ($sgdata[0] ne "non-unique");
@@ -268,7 +240,7 @@ post '/upload' => sub {
     if ($sgfoundStatus == 0){ # if the preselected sgRNA is incompatible
       return $c->render(text=>'Preselected sgRNA is incompatible with desired edit: it cuts 3\' (downstream) of the alterations. Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.');
     }
-    elsif ($sgfoundStatus == 1){
+    elsif ($sgfoundStatus == 1 && $rgn eq "Cas9-NGG"){
         return $c->render(text=>'Preselected sgRNA cuts >'.$maxEditDistance.'nt from the desired edits, and is predicted to be lower efficiency. <br>Please do one of the following: 1) Choose a different sgRNA, 2) Rerun pegFinder without specifying an sgRNA, or 3) or use an sgRNA finder (Broad, CRISPRscan) and upload the results.');
     }
     $sgtable .= "<tr><th>sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceToEditStart</th><th>Seed/PAM_Disrupt</th><th>Chosen</th></tr>";
@@ -283,15 +255,7 @@ post '/upload' => sub {
       my @nickdata;
 
       if ($boolfile == 0 || $data_text eq "" || $rgn ne "Cas9-NGG"){ #if the file is invalid or absent, or non-Cas9-NGG was chosen, use the standalone subroutine
-        if ($rgn eq "Cas9-NGG"){
-          @nickdata = find_choose_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
-        }
-        elsif ($rgn eq "Cas9-NG"){
-          @nickdata = find_NG_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
-        }
-        elsif ($rgn eq "Cas9-SpRY"){
-          @nickdata = find_SpRY_nick_sgRNA($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
-        }
+        @nickdata = find_choose_nick_sgRNA_general($seq1, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist,$rgn);
       }
       elsif ($boolfile == 1 && $rgn eq "Cas9-NGG") {#if the sgRNA file is a valid Broad file
         @nickdata = find_broad_nicksgRNA($data_text, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$minNickDist,$maxNickDist);
@@ -300,47 +264,93 @@ post '/upload' => sub {
         @nickdata = find_crisprscan_nicksgRNA($data_text, $minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq1,$minNickDist,$maxNickDist);
       }
       ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
-          
-      my @pe3bnickdata = find_pe3b_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter);
+        
+
+      my @pe3bnickdata = find_pe3b_sgRNA_general($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter,$rgn);
       ($chosenNickSG3b,$chosenNickSGPos3b,$chosenNickOrientation3b,$chosenNickSGDist3b,$nicksghashpt3b) = @pe3bnickdata;
 
-      if ($chosenNickSG3b ne "none found"){ # if a PE3b sgRNA was found
-        %nicksghash3b = %$nicksghashpt3b;
+      # if a valid sgRNa file was uploaded:
+      if ($boolfile == 1 || $boolfile == 2){
+        if ($chosenNickSG3b ne "none found"){ # if a PE3b sgRNA was found
+          %nicksghash3b = %$nicksghashpt3b;
+          $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>OnTargetScore</th><th>CutPosition</th><th>Orientation</th><th>DistanceTo_pegRNA_nick</th><th>Type</th><th>Chosen</th></tr>";
 
-        $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceTo_pegRNA_nick</th><th>Type</th><th>Chosen</th></tr>";
-
-        foreach my $k (sort {$nicksghash3b{$a}[3] <=> $nicksghash3b{$b}[3]} keys %nicksghash3b){
-          $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash3b{$k}[1]</td><td>$nicksghash3b{$k}[2]</td><td>$nicksghash3b{$k}[3]</td><td>PE3b</td>";
-          if ($k eq $chosenNickSG3b){
-            $nicksgtable .= "<td>X (PE3b)</td></tr>";
-          }
-          else { 
-            $nicksgtable .= "<td></td></tr>";
-          }
-        }
-      }
-
-            
-      if ($chosenNickSG ne "none found"){ # if a PE3 sgRNA was found
-        %nicksghash = %$nicksghashpt;
-              
-        if ($chosenNickSG3b eq "none found"){
-          $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceTo_pegRNA_nick</th><th>Type</th><th>Chosen</th></tr>";
-        }
-        foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
-          $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash{$k}[1]</td><td>$nicksghash{$k}[2]</td><td>$nicksghash{$k}[3]</td><td>PE3</td>";
-          if ($k eq $chosenNickSG){
-            $nicksgtable .= "<td>X (PE3)</td></tr>";
-          }
-          else { 
+          foreach my $k (sort {$nicksghash3b{$a}[3] <=> $nicksghash3b{$b}[3] } keys %nicksghash3b){
+            $nicksgtable .= "<tr><td>$k</td><td>NA</td><td>$nicksghash3b{$k}[1]</td><td>$nicksghash3b{$k}[2]</td><td>$nicksghash3b{$k}[3]</td><td>PE3b</td>";
+            if ($k eq $chosenNickSG3b){
+              $nicksgtable .= "<td>X (PE3b)</td></tr>";
+            }
+            else { 
               $nicksgtable .= "<td></td></tr>";
+            }
           }
         }
+                  
+        if ($chosenNickSG ne "none found"){ # if a PE3 sgRNA was found
+          %nicksghash = %$nicksghashpt;
+                    
+          if ($chosenNickSG3b eq "none found"){
+            $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>OnTargetScore</th><th>CutPosition</th><th>Orientation</th><th>DistanceTo_pegRNA_nick</th><th>Type</th><th>Chosen</th></tr>";
+          }
+          foreach my $k (sort {$nicksghash{$b}[0] <=> $nicksghash{$a}[0]} keys %nicksghash){
+            $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash{$k}[0]</td><td>$nicksghash{$k}[1]</td><td>$nicksghash{$k}[2]</td><td>$nicksghash{$k}[3]</td><td>PE3</td>";
+            if ($k eq $chosenNickSG){
+              $nicksgtable .= "<td>X (PE3)</td></tr>";
+            }
+            else { 
+              $nicksgtable .= "<td></td></tr>";
+            }
+          }
+        }
+
+        #if no PE3/PE3b sgRNAs found
+        elsif ($chosenNickSG eq "none found" && $chosenNickSG3b eq "none found") {
+          $nicksgtable .= '<tr><br>No suitable secondary nicking sgRNA found</tr>';
+        }
+        $nicksgtable .= "</table>";
       }
-      elsif ($chosenNickSG eq "none found" && $chosenNickSG3b eq "none found") {
-        $nicksgtable .= '<tr><br>No suitable secondary nicking sgRNA found</tr>';
+
+      ##### if no sgRNA file was provided:
+      else {
+        if ($chosenNickSG3b ne "none found"){ # if a PE3b sgRNA was found
+          %nicksghash3b = %$nicksghashpt3b;
+
+          $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceTo_pegRNA_nick</th><th>Type</th><th>Chosen</th></tr>";
+
+          foreach my $k (sort {$nicksghash3b{$a}[3] <=> $nicksghash3b{$b}[3]} keys %nicksghash3b){
+            $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash3b{$k}[1]</td><td>$nicksghash3b{$k}[2]</td><td>$nicksghash3b{$k}[3]</td><td>PE3b</td>";
+            if ($k eq $chosenNickSG3b){
+              $nicksgtable .= "<td>X (PE3b)</td></tr>";
+            }
+            else { 
+              $nicksgtable .= "<td></td></tr>";
+            }
+          }
+        }
+
+        if ($chosenNickSG ne "none found"){ # if a PE3 sgRNA was found
+          %nicksghash = %$nicksghashpt;
+                
+          if ($chosenNickSG3b eq "none found"){
+            $nicksgtable .= "<tr><th>Nicking sgRNA_Seq</th><th>CutPosition</th><th>Orientation</th><th>DistanceTo_pegRNA_nick</th><th>Type</th><th>Chosen</th></tr>";
+          }
+          foreach my $k (sort {abs($nicksghash{$a}[3]-50) <=> abs($nicksghash{$b}[3]-50)} keys %nicksghash){
+            $nicksgtable .= "<tr><td>$k</tdh><td>$nicksghash{$k}[1]</td><td>$nicksghash{$k}[2]</td><td>$nicksghash{$k}[3]</td><td>PE3</td>";
+            if ($k eq $chosenNickSG){
+              $nicksgtable .= "<td>X (PE3)</td></tr>";
+            }
+            else { 
+              $nicksgtable .= "<td></td></tr>";
+            }
+          }
+        }
+
+        # no PE3 or PE3b sgRNAs found
+        elsif ($chosenNickSG eq "none found" && $chosenNickSG3b eq "none found") {
+          $nicksgtable .= '<tr><br>No suitable secondary nicking sgRNA found</tr>';
+        }
+        $nicksgtable .= "</table>";
       }
-      $nicksgtable .= "</table>";
     }
   }
 
@@ -368,7 +378,7 @@ post '/upload' => sub {
       }
 
       #also find sgRNAs independently to confirm the sgRNA file is derived from the exact wildtype sequence
-      my @confirmsgdata = find_choose_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2);
+      my @confirmsgdata = find_choose_sgRNA_general($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$wtdelcounter,$seq2,$rgn);
 
       #if no sgRNAs were found, report back
       if ($sgdata[0] eq "none"){
@@ -425,7 +435,7 @@ post '/upload' => sub {
           }
           ($chosenNickSG,$chosenNickSGPos,$chosenNickOrientation,$chosenNickSGDist,$nicksghashpt) = @nickdata;
               
-          my @pe3bnickdata = find_pe3b_sgRNA($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter);
+          my @pe3bnickdata = find_pe3b_sgRNA_general($seq1,$minEditPos,$maxEditPos,$maxEditDistance,$chosenCutPos,$chosenOrientation,$seq2,$wtdelcounter,$mutdelcounter,$rgn);
           ($chosenNickSG3b,$chosenNickSGPos3b,$chosenNickOrientation3b,$chosenNickSGDist3b,$nicksghashpt3b) = @pe3bnickdata;
 
           if ($chosenNickSG3b ne "none found"){ # if a PE3b sgRNA was found
@@ -799,9 +809,9 @@ __DATA__
     <br><br>
     %= form_for upload => (enctype => 'multipart/form-data') => begin
       Wildtype/reference sequence<br>
-      %= text_area 'wildtype',cols => 80, rows => 5, maxlength => 10000, placeholder => 'Wildtype/reference DNA sequence in plaintext. Must share 5\' and 3\' ends with the edited/desired sequence. Recommend >100 bp flanks around target edit.'
+      %= text_area 'wildtype',cols => 80, rows => 5, maxlength => 2000, placeholder => 'Wildtype/reference DNA sequence in plaintext. Must share 5\' and 3\' ends with the edited/desired sequence. Recommend 100 bp flanks around target edit. Max total length 500 bp.'
       <br><br>Edited/desired sequence <br>
-      %= text_area 'edited', cols => 80, rows => 5, maxlength => 10000, placeholder => 'Edited/desired DNA sequence in plaintext. Must share 5\' and 3\' ends with the wildtype sequence. Recommend >100 bp flanks around target edit.'
+      %= text_area 'edited', cols => 80, rows => 5, maxlength => 2000, placeholder => 'Edited/desired DNA sequence in plaintext. Must share 5\' and 3\' ends with the wildtype sequence. Recommend 100 bp flanks around target edit. Max total length 500 bp.'
       <br>
       <br><b>1.</b> Find PE3/PE3b secondary nicking sgRNAs: &nbsp;
      
@@ -831,7 +841,7 @@ __DATA__
       <br><br>
 
       <b>5.</b> (Optional) Incorporate on-target/off-target predictions. (Cas9-NGG only)<p>
-      &nbsp;&nbsp;&nbsp;&nbsp;* Upload <a href="https://portals.broadinstitute.org/gpp/public/analysis-tools/sgrna-design"> Broad sgRNA finder </a> or <a href="https://www.crisprscan.org/?page=sequence"> CRISPRscan </a>results: &nbsp;&nbsp;&nbsp;  
+      &nbsp;&nbsp;&nbsp;&nbsp;* Upload <a href="https://portals.broadinstitute.org/gpp/public/analysis-tools/sgrna-design" target="_blank"> Broad sgRNA finder </a> or <a href="https://www.crisprscan.org/?page=sequence" target="_blank"> CRISPRscan </a>results: &nbsp;&nbsp;&nbsp;  
       %= file_field 'sgRNA', id => 'sgRNAControl', value => ''
       <button id = "clear" type="button"> Clear </button>
       <br>&nbsp;&nbsp&nbsp;&nbsp;* Use the wildtype sequence as input and report all possible sgRNAs.<br> <br>
@@ -844,11 +854,29 @@ __DATA__
       
     % end
 
+  <!-- Default Statcounter code for Pegfinder
+  http://pegfinder.sidichenlab.org/ -->
+  <script type="text/javascript">
+  var sc_project=12160803; 
+  var sc_invisible=1; 
+  var sc_security="a9f5687d"; 
+  </script>
+  <script type="text/javascript"
+  src="https://www.statcounter.com/counter/counter.js"
+  async></script>
+  <noscript><div class="statcounter"><a title="Web Analytics"
+  href="https://statcounter.com/" target="_blank"><img
+  class="statcounter"
+  src="https://c.statcounter.com/12160803/0/a9f5687d/1/"
+  alt="Web Analytics"></a></div></noscript>
+  <!-- End of Statcounter Code -->
+
   </body>
 
   <footer>
-    <p> &copy 2019-2020, Laboratory of Sidi Chen</p>
-    <br> See our manuscript describing pegFinder: <a href="https://www.biorxiv.org/content/10.1101/2020.05.06.081612v1">bioRxiv </a>
+    <br> If you use pegFinder in your research, please consider citing:
+    <br> <a href="https://www.nature.com/articles/s41551-020-00622-8" target="_blank"> Chow RD*, Chen JS*, Shen J, and Chen S. Nature Biomedical Engineering 2020. </a> <br>
+    <br><p> &copy 2019-2020, Laboratory of Sidi Chen</p>
   </footer>
   
 </html>
